@@ -1,0 +1,40 @@
+  <h2><span class="sn">13</span> Testing Strategy</h2>
+  <p class="sub">48 tests across 7 test classes &mdash; unit, schema, and integration</p>
+  <div class="g3" style="margin-bottom:14px">
+    <div class="card"><div class="card-h">Unit Tests <span class="badge green">31 tests</span></div><div class="card-b">
+      <p><strong>TextExtractorTest</strong> (7)</p>
+      <p>Text files, Java, Markdown, YAML, unsupported types, extensions</p>
+      <p><strong>ChunkerTest</strong> (7)</p>
+      <p>Empty, null, single chunk, multi-chunk, overlap, stability, offsets</p>
+      <p><strong>EmbeddingServiceTest</strong> (6)</p>
+      <p>Dimensions, normalization, similarity ordering, empty text, tokenization</p>
+      <p><strong>TextNormalizerTest</strong> (6)</p>
+      <p>Nulls, line endings, blank lines, whitespace, null input, unchanged text</p>
+      <p><strong>SearchServiceTest</strong> (5+)</p>
+      <p>Cosine similarity, exact scoring, preview truncation, merge &amp; rank</p>
+    </div></div>
+    <div class="card"><div class="card-h">Schema Tests <span class="badge blue">2 tests</span></div><div class="card-b">
+      <p><strong>SchemaBootstrapTest</strong></p>
+      <p>Verifies all 5 tables are created.</p>
+      <p>Verifies schema creation is idempotent (run twice, no error).</p>
+      <p>Uses temp DuckDB file per test run.</p>
+    </div></div>
+    <div class="card"><div class="card-h">Integration Tests <span class="badge yellow">12 tests</span></div><div class="card-b">
+      <p><strong>FullFlowIntegrationTest</strong></p>
+      <p>Ordered test sequence:</p>
+      <p>1. Upload Java, Markdown, YAML files</p>
+      <p>2. Ingest all artifacts</p>
+      <p>3. Verify extracted text</p>
+      <p>4. Exact search (@Transactional)</p>
+      <p>5. Semantic search (onboarding)</p>
+      <p>6. Hybrid search (material change)</p>
+      <p>7. Stats verification</p>
+      <p>8. Unsupported file &rarr; FAILED</p>
+    </div></div>
+  </div>
+  <div class="term"><div class="term-bar"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div><div class="term-body">
+    <div><span class="p">$ </span><span class="cmd">mvn test</span></div>
+    <div style="height:4px"></div>
+    <div><span class="c">[INFO] Tests run: 48, Failures: 0, Errors: 0, Skipped: 0</span></div>
+    <div><span class="c">[INFO] BUILD SUCCESS</span></div>
+  </div></div>

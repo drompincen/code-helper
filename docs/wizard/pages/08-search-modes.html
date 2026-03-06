@@ -1,0 +1,40 @@
+  <h2><span class="sn">8</span> Search: Exact, Semantic, Hybrid</h2>
+  <p class="sub">Three modes for different search needs &mdash; hybrid is the default</p>
+  <div class="g3" style="margin-bottom:14px">
+    <div class="card"><div class="card-h">Exact Search</div><div class="card-b">
+      <p><span class="badge green">EXACT</span></p>
+      <p>Case-insensitive substring match across all indexed chunk text.</p>
+      <p><strong>Score:</strong> Occurrence count + density (matches &times; length / chunk length)</p>
+      <p><strong>Best for:</strong> Annotations (@Transactional), class names, specific identifiers</p>
+    </div></div>
+    <div class="card"><div class="card-h">Semantic Search</div><div class="card-b">
+      <p><span class="badge blue">SEMANTIC</span></p>
+      <p>Embeds the query phrase, computes cosine similarity against all chunk embeddings.</p>
+      <p><strong>Score:</strong> Cosine similarity (0.0 to 1.0)</p>
+      <p><strong>Best for:</strong> Conceptual queries like "how onboarding state is managed"</p>
+    </div></div>
+    <div class="card"><div class="card-h">Hybrid Search</div><div class="card-b">
+      <p><span class="badge yellow">HYBRID</span></p>
+      <p>Runs both exact and semantic, normalizes scores, merges by chunk ID.</p>
+      <p><strong>Score:</strong> 0.3 &times; exact + 0.7 &times; semantic</p>
+      <p><strong>Best for:</strong> General-purpose search (default CLI mode)</p>
+    </div></div>
+  </div>
+  <h3>Hybrid Merge Algorithm</h3>
+  <div class="orch" style="margin-bottom:14px">
+    <div class="orch-node ct"><div class="ol">Exact Search</div><div class="od">SQL LIKE '%phrase%'</div></div>
+    <div class="orch-arrow">&#9654;</div>
+    <div class="orch-node sp"><div class="ol">Normalize</div><div class="od">score / max_score</div></div>
+    <div class="orch-arrow">&#9654;</div>
+    <div class="orch-node" style="border-color:var(--good)"><div class="ol">Merge</div><div class="od">By chunk_id</div></div>
+    <div class="orch-arrow">&#9654;</div>
+    <div class="orch-node ck"><div class="ol">Rank</div><div class="od">0.3e + 0.7s</div></div>
+  </div>
+  <div class="orch" style="margin-bottom:14px">
+    <div class="orch-node ct"><div class="ol">Semantic Search</div><div class="od">cosine(query, chunk)</div></div>
+    <div class="orch-arrow">&#9654;</div>
+    <div class="orch-node sp"><div class="ol">Normalize</div><div class="od">score / max_score</div></div>
+    <div class="orch-arrow">&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;&#9654;</div>
+    <div class="orch-node ck"><div class="ol" style="visibility:hidden">_</div><div class="od" style="visibility:hidden">_</div></div>
+  </div>
+  <div class="hl"><strong>Deduplication:</strong> When a chunk appears in both exact and semantic results, scores are merged and match_type becomes HYBRID.</div>

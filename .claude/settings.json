@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(ls:*)",
+      "Bash(git:*)",
+      "Bash(java:*)",
+      "Bash(javac:*)",
+      "Bash(jbang:*)",
+      "Bash(mvn:*)",
+      "Bash(gradle:*)",
+      "Bash(chmod:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(touch:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(tar:*)",
+      "Bash(unzip:*)",
+      "Bash(which:*)",
+      "Bash(pwd:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(echo:*)",
+      "Bash(sed:*)",
+      "Bash(protoc:*)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Agent",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "deny": []
+  }
+}

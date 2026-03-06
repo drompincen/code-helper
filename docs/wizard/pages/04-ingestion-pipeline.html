@@ -1,0 +1,14 @@
+  <h2><span class="sn">4</span> Ingestion Pipeline</h2>
+  <p class="sub">Background worker processes artifacts through 6 phases</p>
+  <div class="pipeline" id="pipelineFlow">
+    <div class="pl-step on" data-phase="0"><div class="pl-lbl">1</div><div class="pl-body"><div class="t">Pick Next Pending <span class="badge green">STORED_IN_INTAKE</span></div><div class="d">Worker polls for oldest unprocessed artifact. Single-threaded, no concurrent processing.</div></div></div>
+    <div class="pl-step" data-phase="1"><div class="pl-lbl">2</div><div class="pl-body"><div class="t">Extract Text <span class="badge yellow">PARSING</span></div><div class="d">Detect file type, read content as UTF-8 text or extract from PDF via PDFBox.</div></div></div>
+    <div class="pl-step" data-phase="2"><div class="pl-lbl">3</div><div class="pl-body"><div class="t">Normalize &amp; Store <span class="badge yellow">PARSING</span></div><div class="d">Remove nulls, normalize line endings, collapse whitespace. Persist to artifact_text table.</div></div></div>
+    <div class="pl-step" data-phase="3"><div class="pl-lbl">4</div><div class="pl-body"><div class="t">Chunk Text <span class="badge muted">CHUNKED</span></div><div class="d">Split into fixed-size windows with configurable overlap. Store in artifact_chunks.</div></div></div>
+    <div class="pl-step" data-phase="4"><div class="pl-lbl">5</div><div class="pl-body"><div class="t">Generate Embeddings <span class="badge muted">EMBEDDED</span></div><div class="d">TF-IDF hash vectorization per chunk. Store in chunk_embeddings as DOUBLE[].</div></div></div>
+    <div class="pl-step" data-phase="5"><div class="pl-lbl">6</div><div class="pl-body"><div class="t">Mark Indexed <span class="badge green">INDEXED</span></div><div class="d">Artifact is now searchable. indexed_at timestamp set.</div></div></div>
+  </div>
+  <div class="g2" style="margin-top:14px">
+    <div class="hl"><strong>Failure handling:</strong> If any phase throws, status becomes FAILED with the error message stored. Original intake file is preserved for debugging.</div>
+    <div class="hl warn"><strong>Worker design:</strong> Single-threaded @Scheduled poll. Processes one artifact at a time. Waits for schema bootstrap before first poll.</div>
+  </div>

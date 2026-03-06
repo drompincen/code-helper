@@ -1,0 +1,31 @@
+  <h2><span class="sn">12</span> Configuration &amp; Tuning</h2>
+  <p class="sub">Spring Boot properties with sensible defaults</p>
+  <div class="card" style="margin-bottom:14px"><div class="card-h">Server Configuration</div><div class="card-b">
+    <table class="tbl">
+      <tr><th>Property</th><th>Default</th><th>Description</th></tr>
+      <tr><td style="color:var(--accent)">grpc.server.port</td><td>9090</td><td>gRPC listening port</td></tr>
+      <tr><td style="color:var(--accent)">javaducker.db-path</td><td>data/javaducker.duckdb</td><td>DuckDB database file location</td></tr>
+      <tr><td style="color:var(--accent)">javaducker.intake-dir</td><td>temp/intake</td><td>Upload landing directory</td></tr>
+      <tr><td style="color:var(--accent)">javaducker.chunk-size</td><td>1000</td><td>Characters per chunk</td></tr>
+      <tr><td style="color:var(--accent)">javaducker.chunk-overlap</td><td>200</td><td>Character overlap between chunks</td></tr>
+      <tr><td style="color:var(--accent)">javaducker.embedding-dim</td><td>256</td><td>Embedding vector dimension</td></tr>
+      <tr><td style="color:var(--accent)">javaducker.ingestion-poll-seconds</td><td>5</td><td>Background worker poll interval</td></tr>
+      <tr><td style="color:var(--accent)">javaducker.max-search-results</td><td>20</td><td>Default max results per search</td></tr>
+    </table>
+  </div></div>
+  <div class="g2">
+    <div class="card"><div class="card-h">Override via CLI</div><div class="card-b">
+      <div class="term"><div class="term-bar"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div><div class="term-body" style="font-size:18px">
+        <div><span class="p">$ </span><span class="cmd">java -jar javaducker-1.0.0.jar \</span></div>
+        <div><span class="cmd">  --javaducker.chunk-size=500 \</span></div>
+        <div><span class="cmd">  --javaducker.embedding-dim=512 \</span></div>
+        <div><span class="cmd">  --grpc.server.port=50051</span></div>
+      </div></div>
+    </div></div>
+    <div>
+      <h3>Tuning Guidance</h3>
+      <div class="tile" style="margin-bottom:8px"><div class="nm">Larger chunks (2000+)</div><div class="ds">More context per result, fewer chunks total. Better for documents.</div></div>
+      <div class="tile" style="margin-bottom:8px"><div class="nm">Smaller chunks (300-500)</div><div class="ds">More precise matches, more chunks. Better for code.</div></div>
+      <div class="tile"><div class="nm">Higher embedding dim (512)</div><div class="ds">Less hash collision, slightly better similarity. More memory.</div></div>
+    </div>
+  </div>

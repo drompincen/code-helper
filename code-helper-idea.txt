@@ -1,0 +1,894 @@
+Below is the **v2 delivery plan** I would hand to a junior developer.
+
+I’m assuming **v2** means this scope:
+
+* `JavaDuckerServer` is a **Spring Boot gRPC server**
+* `JavaDuckerClient` is a **JBang-started CLI**
+* uploads land in **`temp/intake` first**
+* a background ingester parses and indexes them
+* searchable units are **chunks**
+* search supports **exact**, **semantic**, and **hybrid**
+* persistence is **DuckDB file-based**
+* both server and client are launched with JBang-friendly entrypoints
+
+That stack is reasonable with the current ecosystem: Spring gRPC provides Spring-friendly gRPC support and documents server setup around `BindableService`; DuckDB’s Java client is JDBC-based and opens or creates a persistent database from a file path; JBang supports single-file and dependency-driven Java launches via directives; and gRPC Java supports unary and streaming RPC patterns. ([Home][1])
+
+# 1. What the junior developer is building
+
+The junior developer should think of JavaDucker v2 as **three internal subsystems inside one server app plus one thin client**:
+
+## Server
+
+Owns:
+
+* gRPC API
+* intake file storage
+* DuckDB metadata/search tables
+* background ingestion worker
+* embedding generation
+* exact/semantic/hybrid retrieval
+
+## Client
+
+Owns:
+
+* CLI argument parsing
+* local file scanning for uploads
+* file upload calls to server
+* search calls to server
+* rendering text output
+
+## Storage
+
+Owns:
+
+* `temp/intake` for newly uploaded raw files
+* `data/javaducker.duckdb` for metadata, chunks, embeddings, and status
+
+# 2. What “done” looks like for v2
+
+At the end of v2, the developer should be able to run:
+
+```bash
+jbang JavaDuckerServer.java serve --db data/javaducker.duckdb --grpc.port 9090 --intake-dir temp/intake
+```
+
+Then from another shell:
+
+```bash
+jbang JavaDuckerClient.java upload-dir --host localhost --port 9090 --root ./repo --ext .java,.xml,.md,.yml,.pdf
+jbang JavaDuckerClient.java find --host localhost --port 9090 --phrase "how onboarding case state is managed" --mode semantic
+jbang JavaDuckerClient.java find --host localhost --port 9090 --phrase "@Transactional" --mode exact
+jbang JavaDuckerClient.java find --host localhost --port 9090 --phrase "material change monitoring" --mode hybrid
+jbang JavaDuckerClient.java cat --host localhost --port 9090 --id <artifactId>
+jbang JavaDuckerClient.java status --host localhost --port 9090 --id <artifactId>
+jbang JavaDuckerClient.java stats --host localhost --port 9090
+```
+
+# 3. Scope boundaries for the junior developer
+
+The developer should **build v2 only**, not the future system.
+
+## Included in v2
+
+* text files
+* basic binary upload flow
+* PDF extraction if parser is already chosen by the team
+* file landing in intake
+* background ingestion
+* chunking
+* embeddings
+* exact search
+* semantic search
+* hybrid search
+* artifact status tracking
+* stats and health
+* JBang entrypoints
+
+## Explicitly excluded from v2
+
+* OCR
+* image understanding
+* auth
+* multi-tenant isolation
+* resumable streaming uploads
+* distributed workers
+* advanced ANN indexing
+* UI
+* production-grade observability stack
+
+That keeps the build realistic.
+
+# 4. Target architecture
+
+The junior developer should implement this flow.
+
+## Upload flow
+
+1. Client scans local files
+2. Client sends bytes + metadata to server
+3. Server writes original file into `temp/intake/<artifact-id>/...`
+4. Server creates an `artifacts` row with status `RECEIVED`
+5. Server marks it `STORED_IN_INTAKE`
+6. Background ingester picks it up later
+
+## Ingestion flow
+
+1. Worker loads next pending artifact
+2. Worker detects content type / file extension
+3. Worker extracts text
+4. Worker normalizes text
+5. Worker splits text into chunks
+6. Worker generates embeddings for chunks
+7. Worker writes chunks and embeddings to DuckDB
+8. Worker marks artifact `INDEXED` or `FAILED`
+
+## Search flow
+
+1. Client sends phrase and mode
+2. Server embeds query if mode is semantic or hybrid
+3. Server runs exact search if mode is exact or hybrid
+4. Server runs semantic similarity over chunk embeddings if mode is semantic or hybrid
+5. Server merges scores for hybrid
+6. Server returns chunk previews and artifact metadata
+
+# 5. Data model the developer should use
+
+The developer should not improvise the schema. Start with these four core tables and one optional event table.
+
+## `artifacts`
+
+One row per uploaded file.
+
+Suggested fields:
+
+* `artifact_id`
+* `file_name`
+* `media_type`
+* `original_client_path`
+* `intake_path`
+* `size_bytes`
+* `sha256`
+* `source_type`
+* `status`
+* `error_message`
+* `created_at`
+* `updated_at`
+* `indexed_at`
+
+## `artifact_text`
+
+One row per successfully extracted artifact.
+
+Suggested fields:
+
+* `artifact_id`
+* `extracted_text`
+* `text_length`
+* `extraction_method`
+
+## `artifact_chunks`
+
+One row per chunk.
+
+Suggested fields:
+
+* `chunk_id`
+* `artifact_id`
+* `chunk_index`
+* `chunk_text`
+* `char_start`
+* `char_end`
+
+## `chunk_embeddings`
+
+One row per chunk embedding.
+
+Suggested fields:
+
+* `chunk_id`
+* `embedding_model`
+* `embedding_dim`
+* `embedding`
+
+DuckDB supports Java access via JDBC and persistent file-backed databases, which is exactly what this design assumes. ([DuckDB][2])
+
+## `ingestion_events` optional but recommended
+
+Suggested fields:
+
+* `event_id`
+* `artifact_id`
+* `state`
+* `message`
+* `created_at`
+
+# 6. Service contract the junior developer should build first
+
+The junior developer should build the API in this order.
+
+## Phase A RPCs
+
+* `Health`
+* `Stats`
+* `UploadFile`
+* `GetArtifactStatus`
+* `GetArtifactText`
+* `Find`
+
+That is enough to demo the system end to end.
+
+## Phase B RPCs
+
+* `UploadDirectoryBatch` if you want server-side acknowledgement for multiple files
+* `RetryArtifact`
+* `ListArtifacts`
+
+gRPC’s Java docs and Spring gRPC docs both support the basic server/client structure needed here. Spring gRPC specifically centers the server model on `BindableService`, while gRPC Java supports unary and streaming patterns if you need them later. ([Home][3])
+
+# 7. Work plan by milestone
+
+This is the part I would give a junior developer as their actual delivery roadmap.
+
+## Milestone 1 — Project skeleton
+
+### Goal
+
+Get both launchables running with no real business logic yet.
+
+### Tasks
+
+Server:
+
+* create Spring Boot app
+* wire Spring gRPC
+* add config flags:
+
+  * `db`
+  * `grpc.port`
+  * `intake-dir`
+* expose `Health` RPC
+* on startup, ensure DuckDB connection can open
+* create schema bootstrap class
+
+Client:
+
+* create JBang-started CLI
+* support `health`
+* connect to gRPC server and print health response
+
+### Acceptance criteria
+
+* server starts
+* client can call `health`
+* DuckDB file is created when missing
+* intake directory is created when missing
+
+Spring gRPC’s current docs describe getting started with Spring Boot integration, and DuckDB documents file-backed connections for Java/JDBC. ([Home][4])
+
+## Milestone 2 — Artifact upload and intake landing
+
+### Goal
+
+Client uploads a file, server stores it in intake, and status is queryable.
+
+### Tasks
+
+Server:
+
+* implement `UploadFile`
+* generate `artifact_id`
+* write file to `temp/intake/<artifact-id>/original`
+* compute checksum
+* insert `artifacts` row
+* implement `GetArtifactStatus`
+
+Client:
+
+* add `upload-file`
+* read file bytes locally
+* send metadata:
+
+  * file name
+  * original path
+  * size
+  * media type if known
+* print `artifact_id`
+
+### Acceptance criteria
+
+* uploaded file appears in intake
+* status becomes `STORED_IN_INTAKE`
+* repeated status call works
+* invalid file path on client gives a clean client-side error
+
+### Junior dev note
+
+Do not parse the file during upload. Upload should be fast and simple.
+
+## Milestone 3 — Background ingestion worker
+
+### Goal
+
+Server asynchronously processes pending intake artifacts.
+
+### Tasks
+
+Server:
+
+* create a scheduled/background worker
+* poll for artifacts in `STORED_IN_INTAKE`
+* transition status:
+
+  * `PARSING`
+  * `CHUNKED`
+  * `EMBEDDED`
+  * `INDEXED`
+  * `FAILED`
+* add `ingestion_events` logging if included
+
+### Acceptance criteria
+
+* uploading a text file eventually moves it to `INDEXED`
+* failed parsing moves it to `FAILED`
+* status is always visible
+* worker does not process the same artifact twice
+
+### Junior dev note
+
+Start with a single-threaded worker. Concurrency can come later.
+
+## Milestone 4 — Text extraction and normalization
+
+### Goal
+
+Convert uploaded files into searchable text.
+
+### Tasks
+
+Server:
+
+* support direct text decoding for:
+
+  * `.txt`
+  * `.md`
+  * `.java`
+  * `.xml`
+  * `.json`
+  * `.yml`
+* optional PDF extraction if assigned
+* add text normalization:
+
+  * remove nulls
+  * normalize line endings
+  * collapse extreme whitespace
+* persist `artifact_text`
+
+### Acceptance criteria
+
+* a `.java` file uploads and extracted text is stored
+* `GetArtifactText` returns that text
+* unsupported binaries fail gracefully or are marked non-searchable
+
+### Junior dev note
+
+Treat extraction as a separate method from chunking. Do not mix them together.
+
+## Milestone 5 — Chunking
+
+### Goal
+
+Search works on chunks, not full files.
+
+### Tasks
+
+Server:
+
+* build chunker
+* chunk extracted text into fixed-size windows
+* store chunk index and text in `artifact_chunks`
+* keep chunk size configurable
+
+### Acceptance criteria
+
+* one artifact produces multiple ordered chunks
+* chunk order is stable
+* previews come from chunk text, not whole-file scanning
+
+### Junior dev note
+
+A simple character-based chunker is fine for v2. Token-perfect chunking is not required yet.
+
+## Milestone 6 — Embeddings and semantic search
+
+### Goal
+
+A phrase can find related content, not only exact matches.
+
+### Tasks
+
+Server:
+
+* choose one embedding service implementation approved by team
+* generate embedding per chunk
+* generate embedding for query phrase
+* store embeddings in `chunk_embeddings`
+* implement semantic similarity search
+
+### Acceptance criteria
+
+* semantically related query returns chunks even when exact words differ
+* exact mode does not require embeddings
+* semantic mode fails cleanly if embeddings are missing
+
+### Junior dev note
+
+Start with brute-force similarity over all chunk embeddings. Do not build ANN or optimization first.
+
+## Milestone 7 — Exact search
+
+### Goal
+
+Support traditional phrase search.
+
+### Tasks
+
+Server:
+
+* implement exact contains search over chunk text
+* optionally include file name matching
+* return scored exact matches
+
+### Acceptance criteria
+
+* `@Transactional` finds the exact chunks containing it
+* exact mode is deterministic
+* results include artifact id, file name, and chunk preview
+
+## Milestone 8 — Hybrid search
+
+### Goal
+
+Blend exact and semantic results.
+
+### Tasks
+
+Server:
+
+* run exact search
+* run semantic search
+* normalize scores
+* merge by chunk id
+* rank final result list
+
+### Acceptance criteria
+
+* hybrid mode returns useful exact hits and semantically related hits
+* duplicates are merged
+* response shows which artifact and chunk matched
+
+### Junior dev note
+
+Do not overcomplicate scoring. A simple weighted merge is enough for v2.
+
+## Milestone 9 — Client search UX
+
+### Goal
+
+CLI becomes easy to use.
+
+### Tasks
+
+Client:
+
+* add `find`
+* add `cat`
+* add `status`
+* add `stats`
+* add `upload-dir`
+
+For `upload-dir`:
+
+* scan local files
+* filter by extensions
+* upload each file one at a time
+* print summary:
+
+  * uploaded
+  * skipped
+  * failed
+
+### Acceptance criteria
+
+* client can upload a repo folder
+* client can search in exact, semantic, and hybrid mode
+* client can fetch extracted text by artifact id
+
+## Milestone 10 — Stats and operational visibility
+
+### Goal
+
+Developer can see what is happening without debugging the DB manually.
+
+### Tasks
+
+Server:
+
+* `Stats` returns:
+
+  * artifact counts by status
+  * indexed artifact count
+  * chunk count
+  * total bytes
+* add log messages for state transitions
+* optionally expose recent failures
+
+### Acceptance criteria
+
+* operator can tell whether ingestion is healthy
+* developer can see failed items and why
+
+# 8. Suggested sprint sequence
+
+If the junior developer is working in short iterations, use this sequence.
+
+## Sprint 1
+
+* project skeleton
+* server startup
+* client startup
+* health
+* DuckDB schema bootstrap
+
+## Sprint 2
+
+* upload-file
+* intake file persistence
+* artifact metadata table
+* status lookup
+
+## Sprint 3
+
+* background worker
+* text extraction for text-native files
+* extracted text retrieval
+
+## Sprint 4
+
+* chunking
+* exact search
+
+## Sprint 5
+
+* embeddings
+* semantic search
+
+## Sprint 6
+
+* hybrid search
+* upload-dir
+* stats
+* polish and bug fixing
+
+# 9. Detailed developer checklist
+
+This is what I would tell the junior developer to check off.
+
+## Server checklist
+
+* [ ] server starts with config
+* [ ] DuckDB file opens or is created
+* [ ] schema is created automatically
+* [ ] intake directory is created automatically
+* [ ] `Health` works
+* [ ] `UploadFile` stores bytes in intake
+* [ ] `GetArtifactStatus` works
+* [ ] worker picks pending artifacts
+* [ ] extraction works for text files
+* [ ] extracted text stored in DB
+* [ ] chunk rows stored in DB
+* [ ] embeddings stored in DB
+* [ ] exact search works
+* [ ] semantic search works
+* [ ] hybrid search works
+* [ ] `Stats` works
+
+## Client checklist
+
+* [ ] `health`
+* [ ] `upload-file`
+* [ ] `upload-dir`
+* [ ] `find`
+* [ ] `cat`
+* [ ] `status`
+* [ ] `stats`
+
+# 10. Testing plan the junior developer should follow
+
+The junior developer should not wait until the end to test.
+
+## Unit tests
+
+Write for:
+
+* checksum generation
+* chunking
+* score merging
+* file extension filtering
+* status transition validation
+
+## Integration tests
+
+Write for:
+
+* upload file → intake landing
+* upload text file → indexed
+* exact search returns expected chunk
+* semantic search returns related chunk
+* hybrid search merges properly
+* unsupported file marks `FAILED`
+
+## Manual test corpus
+
+Create a small local corpus:
+
+* 3 Java files
+* 2 markdown docs
+* 1 YAML config
+* 1 PDF if parser included
+
+Make sure some files contain:
+
+* exact terms like `@Transactional`
+* related concepts phrased differently, so semantic search can prove value
+
+# 11. Guidance on error handling
+
+A junior developer often under-builds this part, so I would be explicit.
+
+## Client-side errors
+
+Examples:
+
+* file not found
+* invalid extension filter
+* cannot reach server
+
+Behavior:
+
+* print clean message
+* exit non-zero
+* do not dump stack trace by default
+
+## Server-side errors
+
+Examples:
+
+* cannot write intake file
+* DuckDB insert fails
+* extraction fails
+* embedding generation fails
+
+Behavior:
+
+* set status `FAILED`
+* store error message
+* keep original intake file if useful
+* return safe gRPC error when appropriate
+
+# 12. Guidance on coding discipline
+
+I would tell the junior developer these rules.
+
+## Rule 1
+
+Keep upload, extraction, chunking, embedding, and search as separate classes or services.
+
+## Rule 2
+
+Never mix transport DTOs with DB entities in the same logic method.
+
+## Rule 3
+
+Do not optimize early. Simpler code first.
+
+## Rule 4
+
+Always record artifact status transitions.
+
+## Rule 5
+
+Search only over chunks, not entire file bodies.
+
+## Rule 6
+
+Make hybrid the default for the CLI once all three modes work.
+
+# 13. Sample usage to include in the README
+
+These examples make sense for v2.
+
+## Start server
+
+```bash
+jbang JavaDuckerServer.java serve \
+  --db data/javaducker.duckdb \
+  --grpc.port 9090 \
+  --intake-dir temp/intake
+```
+
+## Check health
+
+```bash
+jbang JavaDuckerClient.java health --host localhost --port 9090
+```
+
+## Upload one file
+
+```bash
+jbang JavaDuckerClient.java upload-file \
+  --host localhost \
+  --port 9090 \
+  --file ./docs/architecture.md
+```
+
+## Upload a directory
+
+```bash
+jbang JavaDuckerClient.java upload-dir \
+  --host localhost \
+  --port 9090 \
+  --root ./repo \
+  --ext .java,.xml,.md,.yml,.pdf
+```
+
+## Check ingestion status
+
+```bash
+jbang JavaDuckerClient.java status \
+  --host localhost \
+  --port 9090 \
+  --id artifact-123
+```
+
+## Exact search
+
+```bash
+jbang JavaDuckerClient.java find \
+  --host localhost \
+  --port 9090 \
+  --phrase "@Transactional" \
+  --mode exact
+```
+
+## Semantic search
+
+```bash
+jbang JavaDuckerClient.java find \
+  --host localhost \
+  --port 9090 \
+  --phrase "how onboarding approvals are coordinated" \
+  --mode semantic
+```
+
+## Hybrid search
+
+```bash
+jbang JavaDuckerClient.java find \
+  --host localhost \
+  --port 9090 \
+  --phrase "material change monitoring" \
+  --mode hybrid
+```
+
+## Retrieve extracted text
+
+```bash
+jbang JavaDuckerClient.java cat \
+  --host localhost \
+  --port 9090 \
+  --id artifact-123
+```
+
+## View stats
+
+```bash
+jbang JavaDuckerClient.java stats --host localhost --port 9090
+```
+
+# 14. Risks the junior developer should know up front
+
+## Risk 1: trying to do everything in upload
+
+Bad result:
+
+* slow uploads
+* hard-to-debug failures
+* long request times
+
+Correct approach:
+
+* upload to intake first
+* ingest asynchronously later
+
+## Risk 2: embedding entire files instead of chunks
+
+Bad result:
+
+* weak search quality
+* poor previews
+* expensive recomputation
+
+Correct approach:
+
+* embed chunks only
+
+## Risk 3: no status tracking
+
+Bad result:
+
+* impossible to tell what failed
+
+Correct approach:
+
+* every artifact gets a visible lifecycle state
+
+## Risk 4: overengineering vector search early
+
+Bad result:
+
+* too much complexity for v2
+
+Correct approach:
+
+* brute-force semantic similarity first
+
+## Risk 5: storing nothing but raw bytes
+
+Bad result:
+
+* no clear searchable corpus
+
+Correct approach:
+
+* separate original artifacts from extracted searchable text
+
+# 15. What I would tell the junior developer on day one
+
+Build the system in this exact order:
+
+1. server starts
+2. client calls health
+3. file uploads land in intake
+4. artifact row is created
+5. worker picks artifact
+6. extracted text is stored
+7. chunks are stored
+8. exact search works
+9. embeddings are stored
+10. semantic search works
+11. hybrid search works
+12. upload-dir and stats polish everything
+
+That order keeps the system debuggable.
+
+# 16. Final recommendation
+
+For a junior developer, the safest v2 path is:
+
+* **unary upload**
+* **single-threaded background ingestion**
+* **DuckDB file persistence**
+* **chunk-based indexing**
+* **brute-force semantic search**
+* **hybrid search as default CLI mode**
+
+That keeps the implementation understandable while still delivering the feature that matters most: **finding related content, not just exact matches**.
+
+Spring gRPC is a reasonable fit for the server side, DuckDB’s JDBC/file model is a reasonable fit for local persistence, JBang is a reasonable fit for lightweight launchables, and gRPC Java gives you a clean RPC boundary for the client/server split. ([Home][1])
+
+
+[1]: https://docs.spring.io/spring-grpc/reference/index.html?utm_source=chatgpt.com "Spring gRPC Reference"
+[2]: https://duckdb.org/docs/stable/clients/java.html?utm_source=chatgpt.com "Java JDBC Client"
+[3]: https://docs.spring.io/spring-grpc/reference/server.html?utm_source=chatgpt.com "GRPC Server :: Spring gRPC Reference"
+[4]: https://docs.spring.io/spring-grpc/reference/getting-started.html?utm_source=chatgpt.com "Getting Started :: Spring gRPC Reference"

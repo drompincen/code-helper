@@ -1,0 +1,26 @@
+  <h2><span class="sn">2</span> Architecture Overview</h2>
+  <p class="sub">Spring Boot server, gRPC transport, DuckDB persistence, picocli client</p>
+  <div style="max-width:680px;margin:0 auto 14px">
+    <div class="arch" style="border-color:rgba(255,153,0,.4)"><div class="al">CLI Client (picocli)</div><div class="ad">7 commands &bull; gRPC blocking stubs &bull; <span class="pill a" style="font-size:14px">Java 21</span></div></div>
+    <div class="conn"></div>
+    <div class="arch"><div class="al" style="color:var(--good)">gRPC Transport</div><div class="ad">6 RPCs &bull; Protobuf &bull; Port 9090</div></div>
+    <div class="conn"></div>
+    <div class="arch" style="border-color:rgba(255,176,32,.4)"><div class="al" style="color:var(--warn)">Server (Spring Boot)</div><div class="ad">Upload &bull; Ingest &bull; Search &bull; Stats</div></div>
+    <div class="conn"></div>
+    <div class="g3">
+      <div class="arch"><div class="al" style="font-size:16px;color:var(--accent)">Ingestion</div><div class="ad" style="font-size:14px">Extractor, Normalizer, Chunker, Embedder</div></div>
+      <div class="arch"><div class="al" style="font-size:16px;color:var(--accent)">DuckDB</div><div class="ad" style="font-size:14px">5 tables, file-based, JDBC</div></div>
+      <div class="arch"><div class="al" style="font-size:16px;color:var(--accent)">Intake</div><div class="ad" style="font-size:14px">temp/intake/&lt;id&gt;/file</div></div>
+    </div>
+  </div>
+  <h3>Technology Stack</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:16px">
+    <span class="pill a">Java 21</span><span class="pill a">Spring Boot 3.2</span><span class="pill a">gRPC</span><span class="pill a">Protobuf</span><span class="pill a">DuckDB</span><span class="pill a">picocli</span><span class="pill a">PDFBox</span><span class="pill a">Maven</span>
+  </div>
+  <h3>Design Principles</h3>
+  <div class="g2" style="margin-top:8px">
+    <div class="tile"><div class="nm">Separation of Concerns</div><div class="ds">Upload, extraction, chunking, embedding, and search are each a separate class</div></div>
+    <div class="tile"><div class="nm">Async Ingestion</div><div class="ds">Upload is fast (store &amp; return). Processing happens in a background worker.</div></div>
+    <div class="tile"><div class="nm">Chunk-Based Search</div><div class="ds">Search operates on chunks, not whole files. Better relevance and previews.</div></div>
+    <div class="tile"><div class="nm">Status Tracking</div><div class="ds">Every artifact has a visible lifecycle state. Failures are recorded, not silent.</div></div>
+  </div>

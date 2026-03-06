@@ -1,0 +1,24 @@
+  <h2><span class="sn">5</span> Text Extraction &amp; Normalization</h2>
+  <p class="sub">Convert uploaded files into clean, searchable text</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div>
+      <h3>Supported Formats</h3>
+      <div class="g3">
+        <div class="tile"><div class="nm">Source Code</div><div class="ds">.java .kt .scala .py .js .ts .go .rs .c .cpp .rb .php .swift</div></div>
+        <div class="tile"><div class="nm">Markup &amp; Config</div><div class="ds">.xml .json .yml .yaml .html .css .sql .proto .toml .ini .properties</div></div>
+        <div class="tile"><div class="nm">Documents</div><div class="ds">.txt .md .csv .sh .bat .gradle .pdf</div></div>
+      </div>
+      <div class="hl" style="margin-top:10px"><strong>PDF extraction</strong> uses Apache PDFBox. Text is stripped from all pages.</div>
+    </div>
+    <div>
+      <h3>Normalization Steps</h3>
+      <div class="pipeline">
+        <div class="pl-step on"><div class="pl-lbl">1</div><div class="pl-body"><div class="t">Remove null characters</div><div class="d">\0 bytes stripped from content</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">2</div><div class="pl-body"><div class="t">Normalize line endings</div><div class="d">\r\n and \r converted to \n</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">3</div><div class="pl-body"><div class="t">Collapse blank lines</div><div class="d">4+ consecutive newlines reduced to 3</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">4</div><div class="pl-body"><div class="t">Collapse whitespace</div><div class="d">5+ spaces/tabs within lines reduced to 4</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">5</div><div class="pl-body"><div class="t">Trim</div><div class="d">Trailing whitespace per line, leading/trailing for entire text</div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="hl warn"><strong>Unsupported files</strong> (e.g., .png, .exe) cause the artifact to be marked FAILED with a descriptive error message.</div>

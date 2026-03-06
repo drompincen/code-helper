@@ -1,0 +1,46 @@
+  <h2><span class="sn">14</span> Sequence: Upload &amp; Ingest</h2>
+  <p class="sub">Full flow from CLI upload to INDEXED status</p>
+  <div class="mermaid-wrap diagram-full"><pre class="mermaid">
+sequenceDiagram
+    participant Client
+    participant gRPC
+    participant UploadService
+    participant FileSystem
+    participant DuckDB
+    participant IngestionWorker
+    participant TextExtractor
+    participant Chunker
+    participant EmbeddingService
+
+    Client->>gRPC: UploadFile(name, bytes)
+    gRPC->>UploadService: upload(name, path, media, bytes)
+    UploadService->>UploadService: generate UUID
+    UploadService->>FileSystem: write temp/intake/uuid/file
+    UploadService->>UploadService: compute SHA-256
+    UploadService->>DuckDB: INSERT artifacts (STORED_IN_INTAKE)
+    UploadService-->>gRPC: artifact_id
+    gRPC-->>Client: UploadFileResponse
+
+    Note over IngestionWorker: @Scheduled poll (every 5s)
+    IngestionWorker->>DuckDB: SELECT next STORED_IN_INTAKE
+    DuckDB-->>IngestionWorker: artifact_id, intake_path
+
+    IngestionWorker->>DuckDB: UPDATE status = PARSING
+    IngestionWorker->>TextExtractor: extract(intake_path)
+    TextExtractor-->>IngestionWorker: text, method
+    IngestionWorker->>DuckDB: INSERT artifact_text
+
+    IngestionWorker->>DuckDB: UPDATE status = CHUNKED
+    IngestionWorker->>Chunker: chunk(text, 1000, 200)
+    Chunker-->>IngestionWorker: chunks[]
+    IngestionWorker->>DuckDB: INSERT artifact_chunks
+
+    IngestionWorker->>DuckDB: UPDATE status = EMBEDDED
+    loop For each chunk
+        IngestionWorker->>EmbeddingService: embed(chunk_text)
+        EmbeddingService-->>IngestionWorker: double[256]
+        IngestionWorker->>DuckDB: INSERT chunk_embeddings
+    end
+
+    IngestionWorker->>DuckDB: UPDATE status = INDEXED
+  </pre></div>

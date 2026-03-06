@@ -1,0 +1,53 @@
+  <h2><span class="sn">16</span> Quick Start</h2>
+  <p class="sub">Build, run, and search in 3 minutes</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div>
+      <div class="term"><div class="term-bar"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div><div class="term-body">
+        <div><span class="c"># Step 1: Build</span></div>
+        <div><span class="p">$ </span><span class="cmd">mvn package -DskipTests</span></div>
+        <div style="height:6px"></div>
+        <div><span class="c"># Step 2: Start server</span></div>
+        <div><span class="p">$ </span><span class="cmd">./run-server.sh</span></div>
+        <div style="height:6px"></div>
+        <div><span class="c"># Step 3: Upload your code (new terminal)</span></div>
+        <div><span class="p">$ </span><span class="cmd">./run-client.sh upload-dir \</span></div>
+        <div><span class="cmd">    --root ./my-project \</span></div>
+        <div><span class="cmd">    --ext .java,.md,.yml</span></div>
+        <div style="height:6px"></div>
+        <div><span class="c"># Step 4: Wait a few seconds for ingestion...</span></div>
+        <div style="height:6px"></div>
+        <div><span class="c"># Step 5: Search!</span></div>
+        <div><span class="p">$ </span><span class="cmd">./run-client.sh find \</span></div>
+        <div><span class="cmd">    --phrase "error handling" \</span></div>
+        <div><span class="cmd">    --mode hybrid</span></div>
+      </div></div>
+    </div>
+    <div>
+      <div class="card"><div class="card-h">Prerequisites</div><div class="card-b">
+        <div><span style="color:var(--accent)">&#10003;</span> Java 21+</div>
+        <div><span style="color:var(--accent)">&#10003;</span> Maven 3.9+</div>
+        <div><span style="color:var(--muted)">No external databases, no API keys, no Docker</span></div>
+      </div></div>
+      <div class="card" style="margin-top:10px"><div class="card-h">Useful Commands</div><div class="card-b" style="padding:4px 12px">
+        <table class="tbl" style="font-size:16px">
+          <tbody>
+            <tr><td><code>./run-client.sh health</code></td><td>Verify server is up</td></tr>
+            <tr><td><code>./run-client.sh stats</code></td><td>Check ingestion progress</td></tr>
+            <tr><td><code>./run-client.sh status --id X</code></td><td>Track one artifact</td></tr>
+            <tr><td><code>./run-client.sh cat --id X</code></td><td>View extracted text</td></tr>
+          </tbody>
+        </table>
+      </div></div>
+      <div class="card" style="margin-top:10px"><div class="card-h">Run Tests</div><div class="card-b">
+        <div class="term"><div class="term-bar"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div><div class="term-body" style="font-size:18px">
+          <div><span class="p">$ </span><span class="cmd">mvn test</span></div>
+          <div><span class="c"># 48 tests, all passing</span></div>
+        </div></div>
+      </div></div>
+    </div>
+  </div>
+  <div style="text-align:center;padding:8px 0">
+    <p style="color:var(--accent);font-weight:700;font-size:20px;margin-bottom:4px">Ready to explore?</p>
+    <p style="color:var(--muted);font-size:18px;margin-bottom:10px">Upload your codebase, search by meaning, find what grep can't.</p>
+    <button class="nav-btn primary" onclick="goHome()" style="font-size:18px;padding:12px 28px">&#8962; Back to Topics</button>
+  </div>

@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package javaducker;
+
+option java_package = "com.javaducker.proto";
+option java_multiple_files = true;
+
+service JavaDucker {
+  rpc Health (HealthRequest) returns (HealthResponse);
+  rpc Stats (StatsRequest) returns (StatsResponse);
+  rpc UploadFile (UploadFileRequest) returns (UploadFileResponse);
+  rpc GetArtifactStatus (GetArtifactStatusRequest) returns (GetArtifactStatusResponse);
+  rpc GetArtifactText (GetArtifactTextRequest) returns (GetArtifactTextResponse);
+  rpc Find (FindRequest) returns (FindResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  int64 total_artifacts = 1;
+  int64 indexed_artifacts = 2;
+  int64 failed_artifacts = 3;
+  int64 pending_artifacts = 4;
+  int64 total_chunks = 5;
+  int64 total_bytes = 6;
+  map<string, int64> artifacts_by_status = 7;
+}
+
+message UploadFileRequest {
+  string file_name = 1;
+  string original_client_path = 2;
+  string media_type = 3;
+  int64 size_bytes = 4;
+  bytes content = 5;
+}
+
+message UploadFileResponse {
+  string artifact_id = 1;
+  string status = 2;
+}
+
+message GetArtifactStatusRequest {
+  string artifact_id = 1;
+}
+
+message GetArtifactStatusResponse {
+  string artifact_id = 1;
+  string file_name = 2;
+  string status = 3;
+  string error_message = 4;
+  string created_at = 5;
+  string updated_at = 6;
+  string indexed_at = 7;
+}
+
+message GetArtifactTextRequest {
+  string artifact_id = 1;
+}
+
+message GetArtifactTextResponse {
+  string artifact_id = 1;
+  string extracted_text = 2;
+  int64 text_length = 3;
+  string extraction_method = 4;
+}
+
+message FindRequest {
+  string phrase = 1;
+  SearchMode mode = 2;
+  int32 max_results = 3;
+}
+
+enum SearchMode {
+  HYBRID = 0;
+  EXACT = 1;
+  SEMANTIC = 2;
+}
+
+message FindResponse {
+  repeated SearchResult results = 1;
+  int32 total_results = 2;
+}
+
+message SearchResult {
+  string artifact_id = 1;
+  string file_name = 2;
+  string chunk_id = 3;
+  int32 chunk_index = 4;
+  string preview = 5;
+  double score = 6;
+  string match_type = 7;
+}

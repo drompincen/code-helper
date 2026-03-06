@@ -1,0 +1,32 @@
+  <h2><span class="sn">6</span> Chunking Strategy</h2>
+  <p class="sub">Fixed-size character windows with configurable overlap</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div>
+      <h3>How It Works</h3>
+      <div class="card"><div class="card-h">Algorithm</div><div class="card-b">
+        <p><strong>Window size:</strong> 1000 characters (default)</p>
+        <p><strong>Overlap:</strong> 200 characters (default)</p>
+        <p><strong>Step:</strong> size - overlap = 800 characters</p>
+        <p>Text is sliced into overlapping windows. Each chunk records its character offset (start, end) for precise location.</p>
+      </div></div>
+      <div class="hl" style="margin-top:10px"><strong>Why overlap?</strong> Ensures that phrases split across chunk boundaries still appear in at least one complete chunk.</div>
+    </div>
+    <div>
+      <h3>Example</h3>
+      <div class="term"><div class="term-bar"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div><div class="term-body">
+        <div><span class="c">// Input: 2500 chars, chunk=1000, overlap=200</span></div>
+        <div style="height:4px"></div>
+        <div><span class="p">Chunk 0:</span> <span class="cmd">chars 0-1000</span></div>
+        <div><span class="p">Chunk 1:</span> <span class="cmd">chars 800-1800</span></div>
+        <div><span class="p">Chunk 2:</span> <span class="cmd">chars 1600-2500</span></div>
+        <div style="height:4px"></div>
+        <div><span class="c">// 3 chunks, 200-char overlap between each</span></div>
+      </div></div>
+      <h3>Properties</h3>
+      <div class="g2" style="margin-top:8px">
+        <div class="tile"><div class="nm">Stable Order</div><div class="ds">Same input always produces same chunks</div></div>
+        <div class="tile"><div class="nm">Offset Tracking</div><div class="ds">char_start and char_end map back to original text</div></div>
+      </div>
+      <div class="hl blue" style="margin-top:10px"><strong>v2 note:</strong> Character-based chunking is sufficient. Token-perfect or syntax-aware chunking is a future enhancement.</div>
+    </div>
+  </div>

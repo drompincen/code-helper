@@ -1,0 +1,11 @@
+target/
+data/
+temp/
+*.class
+*.jar
+*.log
+.idea/
+*.iml
+.DS_Store
+*.duckdb
+*.duckdb.wal

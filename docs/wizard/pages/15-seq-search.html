@@ -1,0 +1,36 @@
+  <h2><span class="sn">15</span> Sequence: Search Flow</h2>
+  <p class="sub">Query phrase &rarr; scored, ranked results</p>
+  <div class="mermaid-wrap diagram-full"><pre class="mermaid">
+sequenceDiagram
+    participant Client
+    participant gRPC
+    participant SearchService
+    participant EmbeddingService
+    participant DuckDB
+
+    Client->>gRPC: Find(phrase, HYBRID, max=20)
+    gRPC->>SearchService: hybridSearch(phrase, 20)
+
+    Note over SearchService: Exact Search Branch
+    SearchService->>DuckDB: SELECT chunks WHERE LOWER(text) LIKE '%phrase%'
+    DuckDB-->>SearchService: exact_hits[]
+    SearchService->>SearchService: compute exact scores (count + density)
+
+    Note over SearchService: Semantic Search Branch
+    SearchService->>EmbeddingService: embed(phrase)
+    EmbeddingService-->>SearchService: query_vector[256]
+    SearchService->>DuckDB: SELECT all chunk_embeddings (brute force)
+    DuckDB-->>SearchService: all embeddings
+    SearchService->>SearchService: cosine_similarity(query, each chunk)
+    SearchService->>SearchService: filter > 0.01, sort, limit
+
+    Note over SearchService: Merge
+    SearchService->>SearchService: normalize exact scores (/ max)
+    SearchService->>SearchService: normalize semantic scores (/ max)
+    SearchService->>SearchService: merge by chunk_id
+    SearchService->>SearchService: combined = 0.3*exact + 0.7*semantic
+    SearchService->>SearchService: sort by combined score, limit 20
+
+    SearchService-->>gRPC: FindResponse(results[])
+    gRPC-->>Client: ranked results with previews
+  </pre></div>

@@ -1,0 +1,37 @@
+  <h2><span class="sn">10</span> gRPC API Contract</h2>
+  <p class="sub">6 unary RPCs defined in javaducker.proto</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div class="card"><div class="card-h">Phase A: Core RPCs</div><div class="card-b">
+      <table class="tbl">
+        <tr><th>RPC</th><th>Request</th><th>Response</th><th>Purpose</th></tr>
+        <tr><td style="color:var(--accent)">Health</td><td>empty</td><td>status, version</td><td>Liveness check</td></tr>
+        <tr><td style="color:var(--accent)">Stats</td><td>empty</td><td>counts, by_status map</td><td>Operational visibility</td></tr>
+        <tr><td style="color:var(--accent)">UploadFile</td><td>name, path, bytes</td><td>artifact_id, status</td><td>Store file in intake</td></tr>
+        <tr><td style="color:var(--accent)">GetArtifactStatus</td><td>artifact_id</td><td>status, timestamps</td><td>Track ingestion</td></tr>
+        <tr><td style="color:var(--accent)">GetArtifactText</td><td>artifact_id</td><td>text, method</td><td>Retrieve extracted text</td></tr>
+        <tr><td style="color:var(--accent)">Find</td><td>phrase, mode, max</td><td>results[]</td><td>Search indexed content</td></tr>
+      </table>
+    </div></div>
+    <div>
+      <div class="card" style="margin-bottom:12px"><div class="card-h">SearchResult Message</div><div class="card-b">
+        <table class="schema-tbl">
+          <tr><th>Field</th><th>Type</th></tr>
+          <tr><td>artifact_id</td><td>string</td></tr>
+          <tr><td>file_name</td><td>string</td></tr>
+          <tr><td>chunk_id</td><td>string</td></tr>
+          <tr><td>chunk_index</td><td>int32</td></tr>
+          <tr><td>preview</td><td>string</td></tr>
+          <tr><td>score</td><td>double</td></tr>
+          <tr><td>match_type</td><td>string</td></tr>
+        </table>
+      </div></div>
+      <div class="card"><div class="card-h">SearchMode Enum</div><div class="card-b">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <span class="badge yellow">HYBRID = 0 (default)</span>
+          <span class="badge green">EXACT = 1</span>
+          <span class="badge blue">SEMANTIC = 2</span>
+        </div>
+      </div></div>
+    </div>
+  </div>
+  <div class="hl"><strong>Error handling:</strong> NOT_FOUND for missing artifacts. INTERNAL for server errors. Clean gRPC status codes, not raw exceptions.</div>

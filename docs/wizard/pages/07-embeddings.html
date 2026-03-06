@@ -1,0 +1,28 @@
+  <h2><span class="sn">7</span> Embeddings &amp; Vectors</h2>
+  <p class="sub">Self-contained TF-IDF hash vectorization &mdash; no external API needed</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div>
+      <h3>Embedding Pipeline</h3>
+      <div class="pipeline">
+        <div class="pl-step on"><div class="pl-lbl">1</div><div class="pl-body"><div class="t">Tokenize</div><div class="d">Split on non-alphanumeric, lowercase, filter single chars</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">2</div><div class="pl-body"><div class="t">Remove Stop Words</div><div class="d">Filter ~80 common English words (the, is, and, ...)</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">3</div><div class="pl-body"><div class="t">Unigram Features</div><div class="d">Hash each token to a vector position. Increment by 1.0</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">4</div><div class="pl-body"><div class="t">Bigram Features</div><div class="d">Hash each adjacent token pair. Increment by 0.5</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">5</div><div class="pl-body"><div class="t">L2 Normalize</div><div class="d">Scale vector to unit length for cosine similarity</div></div></div>
+      </div>
+    </div>
+    <div>
+      <h3>Technical Details</h3>
+      <table class="tbl">
+        <tr><th>Property</th><th>Value</th></tr>
+        <tr><td>Dimension</td><td>256 (configurable)</td></tr>
+        <tr><td>Hash function</td><td>FNV-1a variant</td></tr>
+        <tr><td>Feature types</td><td>Unigrams (1.0) + Bigrams (0.5)</td></tr>
+        <tr><td>Normalization</td><td>L2 (unit vector)</td></tr>
+        <tr><td>Similarity</td><td>Cosine (= dot product of unit vectors)</td></tr>
+        <tr><td>Storage</td><td>DOUBLE[] column in DuckDB</td></tr>
+      </table>
+      <div class="hl" style="margin-top:10px"><strong>Why this approach?</strong> Self-contained, no API keys, no model downloads. Captures word overlap and bigram context. Good enough for code search in v2.</div>
+      <div class="hl warn"><strong>Limitation:</strong> No true synonym understanding. "automobile" won't match "car". For that, a real embedding model (e.g., sentence-transformers) would be needed.</div>
+    </div>
+  </div>

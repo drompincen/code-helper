@@ -1,0 +1,36 @@
+  <h2><span class="sn">11</span> CLI Client</h2>
+  <p class="sub">7 picocli subcommands for interacting with the server</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div>
+      <table class="tbl">
+        <tr><th>Command</th><th>Description</th><th>Key Flags</th></tr>
+        <tr><td style="color:var(--accent)">health</td><td>Check server health</td><td>&mdash;</td></tr>
+        <tr><td style="color:var(--accent)">upload-file</td><td>Upload one file</td><td>--file</td></tr>
+        <tr><td style="color:var(--accent)">upload-dir</td><td>Upload directory recursively</td><td>--root --ext</td></tr>
+        <tr><td style="color:var(--accent)">find</td><td>Search indexed content</td><td>--phrase --mode --max</td></tr>
+        <tr><td style="color:var(--accent)">cat</td><td>Get extracted text</td><td>--id</td></tr>
+        <tr><td style="color:var(--accent)">status</td><td>Check artifact status</td><td>--id</td></tr>
+        <tr><td style="color:var(--accent)">stats</td><td>Server statistics</td><td>&mdash;</td></tr>
+      </table>
+      <div class="hl" style="margin-top:10px"><strong>Global options:</strong> --host (default: localhost), --port (default: 9090)</div>
+    </div>
+    <div>
+      <div class="term"><div class="term-bar"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div><div class="term-body">
+        <div><span class="c"># Upload a whole repo</span></div>
+        <div><span class="p">$ </span><span class="cmd">./run-client.sh upload-dir \</span></div>
+        <div><span class="cmd">    --root ./my-project \</span></div>
+        <div><span class="cmd">    --ext .java,.xml,.md,.yml</span></div>
+        <div style="height:6px"></div>
+        <div><span class="c"># Search for a concept</span></div>
+        <div><span class="p">$ </span><span class="cmd">./run-client.sh find \</span></div>
+        <div><span class="cmd">    --phrase "approval workflow" \</span></div>
+        <div><span class="cmd">    --mode semantic</span></div>
+        <div style="height:6px"></div>
+        <div><span class="c"># Find exact annotation</span></div>
+        <div><span class="p">$ </span><span class="cmd">./run-client.sh find \</span></div>
+        <div><span class="cmd">    --phrase "@Transactional" \</span></div>
+        <div><span class="cmd">    --mode exact</span></div>
+      </div></div>
+      <div class="hl warn" style="margin-top:10px"><strong>Error handling:</strong> Clean messages on file-not-found, server unreachable, and invalid args. No stack traces by default.</div>
+    </div>
+  </div>

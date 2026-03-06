@@ -1,0 +1,63 @@
+  <h2><span class="sn">9</span> Data Model</h2>
+  <p class="sub">5 DuckDB tables &mdash; file-based persistence with no external database</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div>
+      <div class="card" style="margin-bottom:12px"><div class="card-h">artifacts</div><div class="card-b">
+        <p>One row per uploaded file. Tracks the full lifecycle.</p>
+        <table class="schema-tbl">
+          <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+          <tr><td>artifact_id</td><td>VARCHAR PK</td><td>UUID</td></tr>
+          <tr><td>file_name</td><td>VARCHAR</td><td>Original filename</td></tr>
+          <tr><td>media_type</td><td>VARCHAR</td><td>MIME type</td></tr>
+          <tr><td>intake_path</td><td>VARCHAR</td><td>Path in intake dir</td></tr>
+          <tr><td>size_bytes</td><td>BIGINT</td><td>File size</td></tr>
+          <tr><td>sha256</td><td>VARCHAR</td><td>Content hash</td></tr>
+          <tr><td>status</td><td>VARCHAR</td><td>Lifecycle state</td></tr>
+          <tr><td>error_message</td><td>VARCHAR</td><td>Failure reason</td></tr>
+        </table>
+      </div></div>
+      <div class="card"><div class="card-h">artifact_text</div><div class="card-b">
+        <p>One row per extracted artifact. The searchable text.</p>
+        <table class="schema-tbl">
+          <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+          <tr><td>artifact_id</td><td>VARCHAR PK</td><td>FK to artifacts</td></tr>
+          <tr><td>extracted_text</td><td>VARCHAR</td><td>Full normalized text</td></tr>
+          <tr><td>text_length</td><td>BIGINT</td><td>Character count</td></tr>
+          <tr><td>extraction_method</td><td>VARCHAR</td><td>TEXT_DECODE or PDFBOX</td></tr>
+        </table>
+      </div></div>
+    </div>
+    <div>
+      <div class="card" style="margin-bottom:12px"><div class="card-h">artifact_chunks</div><div class="card-b">
+        <p>One row per chunk. The search unit.</p>
+        <table class="schema-tbl">
+          <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+          <tr><td>chunk_id</td><td>VARCHAR PK</td><td>artifact_id + index</td></tr>
+          <tr><td>artifact_id</td><td>VARCHAR</td><td>FK to artifacts</td></tr>
+          <tr><td>chunk_index</td><td>INTEGER</td><td>Position in sequence</td></tr>
+          <tr><td>chunk_text</td><td>VARCHAR</td><td>The chunk content</td></tr>
+          <tr><td>char_start</td><td>BIGINT</td><td>Offset in original text</td></tr>
+          <tr><td>char_end</td><td>BIGINT</td><td>End offset</td></tr>
+        </table>
+      </div></div>
+      <div class="card" style="margin-bottom:12px"><div class="card-h">chunk_embeddings</div><div class="card-b">
+        <table class="schema-tbl">
+          <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+          <tr><td>chunk_id</td><td>VARCHAR PK</td><td>FK to chunks</td></tr>
+          <tr><td>embedding_model</td><td>VARCHAR</td><td>tfidf-hash-v1</td></tr>
+          <tr><td>embedding_dim</td><td>INTEGER</td><td>256 default</td></tr>
+          <tr><td>embedding</td><td>DOUBLE[]</td><td>Vector array</td></tr>
+        </table>
+      </div></div>
+      <div class="card"><div class="card-h">ingestion_events</div><div class="card-b">
+        <p>Audit log of status transitions.</p>
+        <table class="schema-tbl">
+          <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+          <tr><td>event_id</td><td>VARCHAR PK</td><td>UUID</td></tr>
+          <tr><td>artifact_id</td><td>VARCHAR</td><td>FK to artifacts</td></tr>
+          <tr><td>state</td><td>VARCHAR</td><td>New state name</td></tr>
+          <tr><td>message</td><td>VARCHAR</td><td>Optional detail</td></tr>
+        </table>
+      </div></div>
+    </div>
+  </div>

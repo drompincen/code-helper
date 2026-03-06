@@ -1,0 +1,30 @@
+  <h2><span class="sn">3</span> Upload Flow</h2>
+  <p class="sub">Client sends bytes &rarr; server stores in intake &rarr; artifact row created</p>
+  <div class="orch">
+    <div class="orch-node ct"><div class="ol">Client</div><div class="od">Read file bytes, detect media type</div></div>
+    <div class="orch-arrow">&#9654;&#9654;&#9654;</div>
+    <div class="orch-node sp"><div class="ol">gRPC: UploadFile</div><div class="od">fileName, path, mediaType, bytes</div></div>
+    <div class="orch-arrow">&#9654;&#9654;&#9654;</div>
+    <div class="orch-node ck"><div class="ol">Server</div><div class="od">Store in intake, compute SHA-256</div></div>
+  </div>
+  <div class="g2" style="margin-top:14px">
+    <div>
+      <h3>What the Server Does</h3>
+      <div class="pipeline">
+        <div class="pl-step on"><div class="pl-lbl">1</div><div class="pl-body"><div class="t">Generate artifact ID <span class="badge green">UUID</span></div><div class="d">Unique identifier for this upload</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">2</div><div class="pl-body"><div class="t">Write to intake directory</div><div class="d">temp/intake/&lt;artifact-id&gt;/&lt;filename&gt;</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">3</div><div class="pl-body"><div class="t">Compute SHA-256 checksum</div><div class="d">For deduplication and integrity verification</div></div></div>
+        <div class="pl-step on"><div class="pl-lbl">4</div><div class="pl-body"><div class="t">Insert artifacts row <span class="badge yellow">STORED_IN_INTAKE</span></div><div class="d">Metadata persisted to DuckDB</div></div></div>
+      </div>
+    </div>
+    <div>
+      <h3>Upload-Dir (Batch)</h3>
+      <div class="card"><div class="card-h">How upload-dir works</div><div class="card-b">
+        <p>Client scans the local directory recursively</p>
+        <p>Filters files by extension (e.g., .java,.md,.yml)</p>
+        <p>Uploads each file one at a time via UploadFile RPC</p>
+        <p>Prints summary: uploaded / skipped / failed</p>
+      </div></div>
+      <div class="hl warn" style="margin-top:10px"><strong>Key rule:</strong> No parsing during upload. Upload is fast and simple. Ingestion happens asynchronously later.</div>
+    </div>
+  </div>

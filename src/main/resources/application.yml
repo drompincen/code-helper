@@ -1,0 +1,16 @@
+grpc:
+  server:
+    port: 9090
+
+javaducker:
+  db-path: data/javaducker.duckdb
+  intake-dir: temp/intake
+  chunk-size: 1000
+  chunk-overlap: 200
+  embedding-dim: 256
+  ingestion-poll-seconds: 5
+  max-search-results: 20
+
+logging:
+  level:
+    com.javaducker: INFO

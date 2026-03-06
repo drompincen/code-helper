@@ -1,0 +1,12 @@
+  <h2><span class="sn">1</span> Business Value &amp; Purpose</h2>
+  <p class="sub">Find code &amp; content by meaning, not just text &mdash; without leaving the terminal</p>
+  <div class="g2" style="margin-bottom:14px">
+    <div class="card"><div class="card-h">The Problem</div><div class="card-b">Large codebases make it hard to find <em>related</em> code. Grep finds exact strings but misses conceptual matches. You know a feature exists somewhere &mdash; but the code uses different words than you'd search for.</div></div>
+    <div class="card"><div class="card-h">The Solution</div><div class="card-b">JavaDucker ingests source files, splits them into chunks, and builds semantic embeddings. Search by <strong>exact match</strong>, <strong>meaning</strong>, or <strong>both combined</strong>. Results show file, chunk, and relevance score.</div></div>
+  </div>
+  <div class="g3" style="margin-bottom:14px">
+    <div class="card"><div class="card-h">Developers</div><div class="card-b">Upload your repo. Search for "how approvals are managed" and find the right service class &mdash; even if the code never uses the word "approvals".</div></div>
+    <div class="card"><div class="card-h">Tech Leads</div><div class="card-b">Onboard new team members faster. "Find everything related to material change monitoring" returns code, docs, and config in one search.</div></div>
+    <div class="card"><div class="card-h">Code Reviewers</div><div class="card-b">Check for related implementations before reviewing a PR. "Are there other @Transactional services like this?" &mdash; exact + semantic in hybrid mode.</div></div>
+  </div>
+  <div class="hl blue"><strong>v2 Scope:</strong> Self-contained server with no external API dependencies. TF-IDF hash embeddings run locally. No auth, no UI, no cloud &mdash; just a gRPC server and a CLI.</div>

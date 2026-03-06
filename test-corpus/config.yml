@@ -1,0 +1,31 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: platform-services
+  datasource:
+    url: jdbc:postgresql://localhost:5432/platformdb
+    driver-class-name: org.postgresql.Driver
+
+onboarding:
+  approval:
+    stages:
+      - SUBMITTED
+      - UNDER_REVIEW
+      - COMPLIANCE_CHECK
+      - APPROVED
+    sla-hours: 48
+
+compliance:
+  monitoring:
+    enabled: true
+    materiality-threshold: 0.75
+    scan-interval-ms: 60000
+
+transactions:
+  processing:
+    max-amount: 1000000
+    daily-limit: 5000000
+    settlement-delay-ms: 30000
