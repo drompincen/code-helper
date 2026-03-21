@@ -266,13 +266,20 @@ public class JavaDuckerMcpServer {
 
     // ── Server lifecycle ──────────────────────────────────────────────────────
 
+    static final boolean WINDOWS =
+        System.getProperty("os.name", "").toLowerCase().contains("win");
+
     static void ensureServerRunning() throws Exception {
         if (isHealthy()) return;
         System.err.println("[javaducker-mcp] Starting JavaDucker server...");
-        new ProcessBuilder(PROJECT_ROOT + "/run-server.sh")
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start();
+        Path script = Path.of(PROJECT_ROOT)
+            .resolve(WINDOWS ? "run-server.cmd" : "run-server.sh");
+        ProcessBuilder pb = WINDOWS
+            ? new ProcessBuilder("cmd", "/c", script.toString())
+            : new ProcessBuilder(script.toString());
+        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+          .redirectError(ProcessBuilder.Redirect.DISCARD)
+          .start();
         long deadline = System.currentTimeMillis() + 60_000;
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(2000);
