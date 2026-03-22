@@ -4,10 +4,8 @@ cd /d "%~dp0"
 set "JAVA_HOME=C:\Users\drom\.jdks\openjdk-23.0.2"
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 
-if not exist "target\javaducker-1.0.0.jar" (
-    echo Building project...
-    call mvn -q package -DskipTests
-)
+echo Building project...
+call mvn -q package -DskipTests
 
 if "%DB%"=="" set DB=data\javaducker.duckdb
 if "%GRPC_PORT%"=="" set GRPC_PORT=9090
