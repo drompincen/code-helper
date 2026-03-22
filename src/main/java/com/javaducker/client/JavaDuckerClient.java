@@ -161,7 +161,7 @@ public class JavaDuckerClient implements Runnable {
         @Option(names = {"--root"}, required = true, description = "Root directory to scan")
         String rootDir;
 
-        @Option(names = {"--ext"}, defaultValue = ".java,.xml,.md,.yml,.json,.txt,.pdf",
+        @Option(names = {"--ext"}, defaultValue = ".java,.xml,.md,.yml,.json,.txt,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.html,.htm,.epub,.rtf,.eml",
                 description = "Comma-separated file extensions to include")
         String extensions;
 
