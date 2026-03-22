@@ -61,6 +61,21 @@ class SchemaBootstrapTest {
     }
 
     @Test
+    void createsDeduplicationIndex() throws SQLException {
+        SchemaBootstrap bootstrap = createBootstrap();
+        bootstrap.createSchema();
+
+        // DuckDB exposes indexes via duckdb_indexes()
+        Connection conn = dataSource.getConnection();
+        try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                "SELECT COUNT(*) FROM duckdb_indexes() WHERE index_name = 'idx_artifacts_name_size'");
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            assertEquals(1, rs.getLong(1), "Dedup index idx_artifacts_name_size should exist");
+        }
+    }
+
+    @Test
     void schemaIsIdempotent() throws SQLException {
         SchemaBootstrap bootstrap = createBootstrap();
 

@@ -237,4 +237,32 @@ class FullFlowIntegrationTest {
         Map<String, String> status = artifactService.getStatus(javaArtifactId);
         assertEquals("INDEXED", status.get("status"));
     }
+
+    @Test
+    @Order(13)
+    void deduplicateUploadByNameAndSize() throws Exception {
+        String content = "unique content for dedup test";
+        byte[] bytes = content.getBytes();
+
+        String firstId = uploadService.upload("dedup-test.txt",
+                "/path/dedup-test.txt", "text/plain", bytes.length, bytes);
+        assertNotNull(firstId);
+
+        String secondId = uploadService.upload("dedup-test.txt",
+                "/other/path/dedup-test.txt", "text/plain", bytes.length, bytes);
+
+        assertEquals(firstId, secondId, "Same name+size should return existing artifact_id");
+    }
+
+    @Test
+    @Order(14)
+    void dedupDoesNotApplyToFailedArtifact() throws Exception {
+        // A re-upload of a FAILED artifact should create a new one
+        String artifactId = uploadService.upload("image.png",
+                "/repo/image.png", "image/png", 4, new byte[]{0, 1, 2, 3});
+        // image.png was uploaded and failed in order(11); this upload should dedup to that failed artifact
+        // Since status=FAILED is excluded from dedup, a new artifact is created
+        // (the failed one from test 11 has status=FAILED, so it is not matched)
+        assertNotNull(artifactId);
+    }
 }

@@ -13,6 +13,7 @@ public class AppConfig {
     private int chunkOverlap = 200;
     private int embeddingDim = 256;
     private int ingestionPollSeconds = 5;
+    private int ingestionWorkerThreads = 4;
     private int maxSearchResults = 20;
 
     public String getDbPath() { return dbPath; }
@@ -32,6 +33,9 @@ public class AppConfig {
 
     public int getIngestionPollSeconds() { return ingestionPollSeconds; }
     public void setIngestionPollSeconds(int ingestionPollSeconds) { this.ingestionPollSeconds = ingestionPollSeconds; }
+
+    public int getIngestionWorkerThreads() { return ingestionWorkerThreads; }
+    public void setIngestionWorkerThreads(int ingestionWorkerThreads) { this.ingestionWorkerThreads = ingestionWorkerThreads; }
 
     public int getMaxSearchResults() { return maxSearchResults; }
     public void setMaxSearchResults(int maxSearchResults) { this.maxSearchResults = maxSearchResults; }

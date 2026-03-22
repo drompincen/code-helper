@@ -35,6 +35,18 @@ public class DuckDBDataSource {
         return sharedConnection;
     }
 
+    @FunctionalInterface
+    public interface ConnectionWork<T> {
+        T execute(Connection conn) throws SQLException;
+    }
+
+    public synchronized <T> T withConnection(ConnectionWork<T> work) throws SQLException {
+        if (sharedConnection == null || sharedConnection.isClosed()) {
+            sharedConnection = DriverManager.getConnection(dbUrl);
+        }
+        return work.execute(sharedConnection);
+    }
+
     @PreDestroy
     public void close() {
         try {

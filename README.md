@@ -67,6 +67,72 @@ java -jar target/javaducker-1.0.0.jar \
 ./run-client.sh --host localhost --port 9090 stats
 ```
 
+## MCP Server (Claude Code Integration)
+
+JavaDucker ships a JBang-based MCP server (`JavaDuckerMcpServer.java`) that exposes the full indexing and search API as tools for Claude Code.
+
+### Setup
+
+1. Start the JavaDucker server:
+   ```cmd
+   run-server.cmd
+   ```
+
+2. Register the MCP server in your Claude Code config (`.claude/settings.json` or `claude_desktop_config.json`):
+   ```json
+   {
+     "mcpServers": {
+       "javaducker": {
+         "command": "C:\\path\\to\\code-helper\\run-mcp.cmd"
+       }
+     }
+   }
+   ```
+
+3. Optionally set environment variables to override defaults:
+   ```
+   GRPC_HOST=localhost    (default: localhost)
+   GRPC_PORT=9090        (default: 9090)
+   PROJECT_ROOT=.        (default: .)
+   ```
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `javaducker_health` | Check server status and version |
+| `javaducker_index_file` | Upload and index a single file by absolute path; returns `artifact_id` |
+| `javaducker_index_directory` | Recursively index all source files under a directory; `extensions` optional (default: `.java,.xml,.md,.yml,.json,.txt,.pdf`) |
+| `javaducker_search` | Search indexed content — `phrase` required, `mode` = `exact`/`semantic`/`hybrid` (default), `max_results` optional |
+| `javaducker_get_file_text` | Retrieve full extracted text of an artifact by `artifact_id` |
+| `javaducker_get_artifact_status` | Check ingestion lifecycle status of an artifact |
+| `javaducker_wait_for_indexed` | Poll until an artifact is `INDEXED` or `FAILED`; `timeout_seconds` optional (default 120) |
+| `javaducker_stats` | Aggregate stats: total/indexed/pending/failed artifacts, chunks, bytes |
+
+### Typical Claude Code workflow
+
+```
+# Index a codebase
+javaducker_index_directory  directory=/repo/src
+javaducker_stats            # monitor progress until indexed == total
+
+# Search
+javaducker_search  phrase="how onboarding approvals work"  mode=hybrid
+javaducker_search  phrase="@Transactional"                 mode=exact
+
+# Read a full file found in search results
+javaducker_get_file_text  artifact_id=<id from search>
+```
+
+### Windows: Build and Run
+
+The `.cmd` scripts pin `JAVA_HOME` to the bundled x86_64 JDK (runs in emulation on ARM64 Windows):
+
+```cmd
+run-server.cmd    # builds if needed, starts gRPC server on port 9090
+run-mcp.cmd       # starts the MCP stdio server via JBang
+```
+
 ## Architecture
 
 ```
@@ -126,6 +192,7 @@ RECEIVED → STORED_IN_INTAKE → PARSING → CHUNKED → EMBEDDED → INDEXED
 | `javaducker.chunk-overlap` | `200` | Overlap between chunks |
 | `javaducker.embedding-dim` | `256` | Embedding vector dimension |
 | `javaducker.ingestion-poll-seconds` | `5` | Background worker poll interval |
+| `javaducker.ingestion-worker-threads` | `4` | Thread pool size for parallel ingestion |
 | `javaducker.max-search-results` | `20` | Default max search results |
 | `grpc.server.port` | `9090` | gRPC server port |
 
@@ -143,14 +210,15 @@ RECEIVED → STORED_IN_INTAKE → PARSING → CHUNKED → EMBEDDED → INDEXED
 ## Testing
 
 ```bash
-# Run all 48 tests
+# Run all 53 tests
 mvn test
 ```
 
 ### Test Coverage
 - **Unit**: TextExtractor, Chunker, EmbeddingService, TextNormalizer, SearchService scoring
-- **Schema**: Table creation and idempotency
-- **Integration**: Full upload → ingest → exact/semantic/hybrid search flow
+- **Schema**: Table creation, idempotency, dedup index
+- **Integration**: Full upload → ingest → exact/semantic/hybrid search flow, dedup, error handling
+- **Parallel**: Concurrent ingestion via thread pool
 
 ## Project Structure
 

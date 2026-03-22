@@ -158,4 +158,20 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Windows ARM64: protoc has no native aarch_64 binary; use x86_64 via emulation -->
+        <profile>
+            <id>windows-aarch64</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <os.detected.classifier>windows-x86_64</os.detected.classifier>
+            </properties>
+        </profile>
+    </profiles>
 </project>

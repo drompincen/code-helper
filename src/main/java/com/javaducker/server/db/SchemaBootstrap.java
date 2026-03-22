@@ -104,6 +104,11 @@ public class SchemaBootstrap {
                 )
                 """);
 
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_artifacts_name_size
+                    ON artifacts (file_name, size_bytes)
+                """);
+
             log.info("Database schema created/verified");
         }
     }

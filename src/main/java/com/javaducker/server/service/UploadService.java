@@ -14,6 +14,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -32,6 +33,12 @@ public class UploadService {
 
     public String upload(String fileName, String originalClientPath, String mediaType,
                          long sizeBytes, byte[] content) throws IOException, SQLException {
+        String existing = findExisting(fileName, sizeBytes);
+        if (existing != null) {
+            log.info("Dedup: returning existing artifact {} for {} ({} bytes)", existing, fileName, sizeBytes);
+            return existing;
+        }
+
         String artifactId = UUID.randomUUID().toString();
 
         Path intakePath = storeInIntake(artifactId, fileName, content);
@@ -42,6 +49,18 @@ public class UploadService {
 
         log.info("Uploaded artifact {} ({}), {} bytes", artifactId, fileName, sizeBytes);
         return artifactId;
+    }
+
+    private String findExisting(String fileName, long sizeBytes) throws SQLException {
+        Connection conn = dataSource.getConnection();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT artifact_id FROM artifacts WHERE file_name = ? AND size_bytes = ? AND status != 'FAILED' LIMIT 1")) {
+            ps.setString(1, fileName);
+            ps.setLong(2, sizeBytes);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getString("artifact_id") : null;
+            }
+        }
     }
 
     private Path storeInIntake(String artifactId, String fileName, byte[] content) throws IOException {
