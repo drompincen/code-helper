@@ -38,7 +38,8 @@ public class IngestionWorker {
     private volatile boolean ready = false;
 
     // Progress tracking
-    private final AtomicLong lastIndexedCount = new AtomicLong(0);
+    private final AtomicLong lastIndexedCount   = new AtomicLong(0);
+    private final AtomicLong lastCompletedTasks = new AtomicLong(0);
     private volatile long lastProgressLogMs = System.currentTimeMillis();
 
     public IngestionWorker(DuckDBDataSource dataSource, ArtifactService artifactService,
@@ -112,14 +113,16 @@ public class IngestionWorker {
             lastProgressLogMs = now;
 
             double pct = total > 0 ? indexed * 100.0 / total : 0.0;
-            int activeThreads = threadPool.getActiveCount();
             int poolSize      = threadPool.getMaximumPoolSize();
+            int activeNow     = threadPool.getActiveCount();
+            long completed    = threadPool.getCompletedTaskCount();
+            long doneInWindow = completed - lastCompletedTasks.getAndSet(completed);
 
-            log.info("[Indexing] {}/{} indexed ({}%) | queued: {} | processing: {} | failed: {} | {} files/min | threads: {}/{}",
+            log.info("[Indexing] {}/{} indexed ({}%) | queued: {} | processing: {} | failed: {} | {} files/min | pool: {} done in 10s, {} active / {} threads",
                 indexed, total, String.format("%.1f", pct),
                 queued, parsing, failed,
                 String.format("%.1f", filesPerMin),
-                activeThreads, poolSize);
+                doneInWindow, activeNow, poolSize);
 
         } catch (Exception e) {
             log.warn("Progress log error", e);
