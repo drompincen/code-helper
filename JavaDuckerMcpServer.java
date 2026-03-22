@@ -154,7 +154,8 @@ public class JavaDuckerMcpServer {
         "node_modules", ".git", ".svn", ".hg",
         "target", "build", "dist", "out", ".gradle",
         "__pycache__", ".pytest_cache", ".mypy_cache",
-        "vendor", ".idea", ".vscode", "coverage"
+        "vendor", ".idea", ".vscode", "coverage",
+        "temp", "test-corpus"
     );
 
     static Map<String, Object> indexDirectory(String directory, String extensions) throws Exception {
