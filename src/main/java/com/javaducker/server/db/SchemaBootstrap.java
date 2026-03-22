@@ -109,6 +109,11 @@ public class SchemaBootstrap {
                     ON artifacts (file_name, size_bytes)
                 """);
 
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_artifacts_client_path
+                    ON artifacts (original_client_path)
+                """);
+
             log.info("Database schema created/verified");
         }
     }

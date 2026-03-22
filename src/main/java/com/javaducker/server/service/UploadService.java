@@ -33,7 +33,7 @@ public class UploadService {
 
     public String upload(String fileName, String originalClientPath, String mediaType,
                          long sizeBytes, byte[] content) throws IOException, SQLException {
-        String existing = findExisting(fileName, sizeBytes);
+        String existing = findExisting(fileName, originalClientPath, sizeBytes);
         if (existing != null) {
             log.info("Dedup: returning existing artifact {} for {} ({} bytes)", existing, fileName, sizeBytes);
             return existing;
@@ -51,8 +51,19 @@ public class UploadService {
         return artifactId;
     }
 
-    private String findExisting(String fileName, long sizeBytes) throws SQLException {
+    private String findExisting(String fileName, String originalClientPath, long sizeBytes) throws SQLException {
         Connection conn = dataSource.getConnection();
+        // Primary dedup: same absolute path already indexed (catches re-runs on same codebase)
+        if (originalClientPath != null && !originalClientPath.isBlank()) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT artifact_id FROM artifacts WHERE original_client_path = ? AND status != 'FAILED' LIMIT 1")) {
+                ps.setString(1, originalClientPath);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getString("artifact_id");
+                }
+            }
+        }
+        // Fallback dedup: same name + size (catches identical files at different paths)
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT artifact_id FROM artifacts WHERE file_name = ? AND size_bytes = ? AND status != 'FAILED' LIMIT 1")) {
             ps.setString(1, fileName);

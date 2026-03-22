@@ -150,6 +150,13 @@ public class JavaDuckerMcpServer {
         return Map.of("artifact_id", r.getArtifactId(), "status", r.getStatus());
     }
 
+    static final Set<String> EXCLUDED_DIRS = Set.of(
+        "node_modules", ".git", ".svn", ".hg",
+        "target", "build", "dist", "out", ".gradle",
+        "__pycache__", ".pytest_cache", ".mypy_cache",
+        "vendor", ".idea", ".vscode", "coverage"
+    );
+
     static Map<String, Object> indexDirectory(String directory, String extensions) throws Exception {
         Path root = Path.of(directory);
         Set<String> exts = Set.of((extensions.isBlank()
@@ -159,8 +166,18 @@ public class JavaDuckerMcpServer {
         List<Map<String, String>> uploaded = new ArrayList<>();
         int[] skipped = {0}, failed = {0};
 
-        try (Stream<Path> walk = Files.walk(root)) {
+        try (Stream<Path> walk = Files.walk(root).filter(p ->
+                !p.equals(root) &&
+                (Files.isRegularFile(p) || EXCLUDED_DIRS.stream().noneMatch(
+                    ex -> p.getFileName() != null && p.getFileName().toString().equals(ex))))) {
             for (Path file : walk.filter(Files::isRegularFile).toList()) {
+                // Skip files inside excluded directories anywhere in the path
+                boolean inExcluded = false;
+                for (Path part : file) {
+                    if (EXCLUDED_DIRS.contains(part.toString())) { inExcluded = true; break; }
+                }
+                if (inExcluded) { skipped[0]++; continue; }
+
                 String name = file.getFileName().toString().toLowerCase();
                 String ext = name.contains(".") ? name.substring(name.lastIndexOf('.')) : "";
                 if (!exts.contains(ext)) { skipped[0]++; continue; }
