@@ -42,7 +42,7 @@ public class JavaDuckerMcpServer {
                 (ex, a) -> call(JavaDuckerMcpServer::health))
             .tool(
                 tool("javaducker_index_file",
-                    "Upload and index a single file (.java,.xml,.md,.yml,.json,.txt,.pdf). " +
+                    "Upload and index a single file (.java,.xml,.md,.yml,.json,.txt,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.html,.htm,.epub,.rtf,.eml). " +
                     "Returns artifact_id. Indexing is async — use javaducker_wait_for_indexed to confirm.",
                     schema(props(
                         "file_path", str("Absolute path to the file to index")),
@@ -52,7 +52,7 @@ public class JavaDuckerMcpServer {
                 tool("javaducker_index_directory",
                     "Recursively index all source files in a directory. This is the primary way to " +
                     "ingest an entire codebase. Async — use javaducker_stats to monitor progress. " +
-                    "extensions defaults to .java,.xml,.md,.yml,.json,.txt,.pdf",
+                    "extensions defaults to .java,.xml,.md,.yml,.json,.txt,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.html,.htm,.epub,.rtf,.eml",
                     schema(props(
                         "directory", str("Absolute path to the root directory to index"),
                         "extensions", str("Comma-separated file extensions, e.g. .java,.xml,.md (optional)")),
@@ -135,7 +135,7 @@ public class JavaDuckerMcpServer {
     static Map<String, Object> indexDirectory(String directory, String extensions) throws Exception {
         Path root = Path.of(directory);
         Set<String> exts = Set.of((extensions.isBlank()
-            ? ".java,.xml,.md,.yml,.json,.txt,.pdf" : extensions)
+            ? ".java,.xml,.md,.yml,.json,.txt,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.html,.htm,.epub,.rtf,.eml" : extensions)
             .toLowerCase().split(","));
 
         List<Map<String, String>> uploaded = new ArrayList<>();

@@ -32,7 +32,7 @@ public class IndexCommand {
         "temp", "test-corpus"
     );
 
-    private static final String DEFAULT_EXTENSIONS = ".java,.xml,.md,.yml,.json,.txt,.pdf";
+    private static final String DEFAULT_EXTENSIONS = ".java,.xml,.md,.yml,.json,.txt,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.html,.htm,.epub,.rtf,.eml";
 
     public void execute(String[] args, Terminal terminal, ApiClient client) {
         PrintWriter out = terminal.writer();

@@ -56,6 +56,27 @@
             <version>${pdfbox.version}</version>
         </dependency>
 
+        <!-- Apache POI — OOXML: docx, pptx, xlsx -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.3.0</version>
+        </dependency>
+
+        <!-- Apache POI — Scratchpad: doc, ppt, xls (legacy Office 97-2003) -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>5.3.0</version>
+        </dependency>
+
+        <!-- Apache ODF Toolkit — odt, odp, ods (LibreOffice) -->
+        <dependency>
+            <groupId>org.odftoolkit</groupId>
+            <artifactId>odfdom-java</artifactId>
+            <version>0.12.0</version>
+        </dependency>
+
         <!-- JLine for interactive terminal CLI -->
         <dependency>
             <groupId>org.jline</groupId>
@@ -68,6 +89,20 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+
+        <!-- Jsoup — HTML/HTM parsing -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.18.1</version>
+        </dependency>
+
+        <!-- Jakarta Mail (angus-mail) — EML email extraction -->
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>angus-mail</artifactId>
+            <version>2.0.3</version>
         </dependency>
     </dependencies>
 

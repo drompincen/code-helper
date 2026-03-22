@@ -12,6 +12,24 @@ Upload source files, index them into searchable chunks, and find content via exa
 - **Apache PDFBox** for PDF extraction
 - **TF-IDF hash vectorization** for self-contained semantic search
 
+## Supported File Types
+
+| Category | Extensions | Library |
+|----------|-----------|---------|
+| Source code | `.java` `.kt` `.scala` `.py` `.js` `.ts` `.go` `.rs` `.c` `.cpp` `.rb` `.php` `.swift` | JDK UTF-8 |
+| Config / data | `.xml` `.json` `.yml` `.yaml` `.toml` `.properties` `.sql` `.csv` | JDK UTF-8 |
+| Docs | `.md` `.txt` | JDK UTF-8 |
+| PDF | `.pdf` | Apache PDFBox |
+| Word | `.docx` `.doc` | Apache POI |
+| PowerPoint | `.pptx` `.ppt` | Apache POI |
+| Excel | `.xlsx` `.xls` | Apache POI |
+| LibreOffice | `.odt` `.odp` `.ods` | Apache ODF Toolkit |
+| HTML | `.html` `.htm` | Jsoup |
+| eBook | `.epub` | Jsoup (ZIP+XHTML) |
+| Rich Text | `.rtf` | JDK RTFEditorKit |
+| Email | `.eml` | Jakarta Mail |
+| Archive | `.zip` | JDK (recurses text entries, 50 MB / 500 entry limit) |
+
 ## Quick Start
 
 ### Prerequisites
