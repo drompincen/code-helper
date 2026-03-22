@@ -15,10 +15,13 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
+import java.util.Map;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class IngestionWorker {
@@ -31,8 +34,12 @@ public class IngestionWorker {
     private final Chunker chunker;
     private final EmbeddingService embeddingService;
     private final AppConfig config;
-    private final ExecutorService threadPool;
+    private final ThreadPoolExecutor threadPool;
     private volatile boolean ready = false;
+
+    // Progress tracking
+    private final AtomicLong lastIndexedCount = new AtomicLong(0);
+    private volatile long lastProgressLogMs = System.currentTimeMillis();
 
     public IngestionWorker(DuckDBDataSource dataSource, ArtifactService artifactService,
                            TextExtractor textExtractor, TextNormalizer textNormalizer,
@@ -44,7 +51,7 @@ public class IngestionWorker {
         this.chunker = chunker;
         this.embeddingService = embeddingService;
         this.config = config;
-        this.threadPool = Executors.newFixedThreadPool(config.getIngestionWorkerThreads());
+        this.threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(config.getIngestionWorkerThreads());
     }
 
     public void markReady() {
@@ -75,6 +82,65 @@ public class IngestionWorker {
         } catch (Exception e) {
             log.error("Ingestion poll error", e);
         }
+    }
+
+    @Scheduled(fixedDelay = 10_000)
+    public void logProgress() {
+        if (!ready) return;
+        try {
+            Map<ArtifactStatus, Long> counts = countsByStatus();
+
+            long queued      = counts.getOrDefault(ArtifactStatus.STORED_IN_INTAKE, 0L);
+            long parsing     = counts.getOrDefault(ArtifactStatus.PARSING, 0L)
+                             + counts.getOrDefault(ArtifactStatus.CHUNKED, 0L)
+                             + counts.getOrDefault(ArtifactStatus.EMBEDDED, 0L);
+            long indexed     = counts.getOrDefault(ArtifactStatus.INDEXED, 0L);
+            long failed      = counts.getOrDefault(ArtifactStatus.FAILED, 0L);
+            long total       = counts.values().stream().mapToLong(Long::longValue).sum();
+            long pending     = total - indexed - failed;
+
+            // Nothing to report when idle
+            if (pending == 0 && threadPool.getActiveCount() == 0) return;
+
+            // Throughput: files indexed since last log
+            long now        = System.currentTimeMillis();
+            long elapsedMs  = now - lastProgressLogMs;
+            long prevIndexed = lastIndexedCount.getAndSet(indexed);
+            double filesPerMin = elapsedMs > 0
+                ? (indexed - prevIndexed) * 60_000.0 / elapsedMs
+                : 0.0;
+            lastProgressLogMs = now;
+
+            double pct = total > 0 ? indexed * 100.0 / total : 0.0;
+            int activeThreads = threadPool.getActiveCount();
+            int poolSize      = threadPool.getMaximumPoolSize();
+
+            log.info("[Indexing] {}/{} indexed ({}%) | queued: {} | processing: {} | failed: {} | {} files/min | threads: {}/{}",
+                indexed, total, String.format("%.1f", pct),
+                queued, parsing, failed,
+                String.format("%.1f", filesPerMin),
+                activeThreads, poolSize);
+
+        } catch (Exception e) {
+            log.warn("Progress log error", e);
+        }
+    }
+
+    private Map<ArtifactStatus, Long> countsByStatus() throws SQLException {
+        return dataSource.withConnection(conn -> {
+            Map<ArtifactStatus, Long> counts = new EnumMap<>(ArtifactStatus.class);
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT status, COUNT(*) FROM artifacts GROUP BY status");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    try {
+                        ArtifactStatus s = ArtifactStatus.valueOf(rs.getString(1));
+                        counts.put(s, rs.getLong(2));
+                    } catch (IllegalArgumentException ignored) {}
+                }
+            }
+            return counts;
+        });
     }
 
     private List<String> findNextPending(int limit) throws SQLException {
