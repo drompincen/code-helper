@@ -1,6 +1,5 @@
-grpc:
-  server:
-    port: 9090
+server:
+  port: 8080
 
 javaducker:
   db-path: data/javaducker.duckdb

@@ -8,11 +8,11 @@ echo Building project...
 call mvn -q package -DskipTests
 
 if "%DB%"=="" set DB=data\javaducker.duckdb
-if "%GRPC_PORT%"=="" set GRPC_PORT=9090
+if "%HTTP_PORT%"=="" set HTTP_PORT=8080
 if "%INTAKE_DIR%"=="" set INTAKE_DIR=temp\intake
 
-echo Starting JavaDucker Server on gRPC port %GRPC_PORT%
+echo Starting JavaDucker Server on HTTP port %HTTP_PORT%
 java -jar target\javaducker-1.0.0.jar ^
     --javaducker.db-path="%DB%" ^
-    --grpc.server.port=%GRPC_PORT% ^
+    --server.port=%HTTP_PORT% ^
     --javaducker.intake-dir="%INTAKE_DIR%" %*

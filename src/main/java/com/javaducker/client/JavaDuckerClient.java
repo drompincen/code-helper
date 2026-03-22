@@ -1,20 +1,22 @@
 package com.javaducker.client;
 
-import com.javaducker.proto.*;
-import com.google.protobuf.ByteString;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.StatusRuntimeException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 @Command(name = "javaducker", mixinStandardHelpOptions = true, version = "2.0.0",
@@ -33,7 +35,7 @@ public class JavaDuckerClient implements Runnable {
     @Option(names = {"--host"}, defaultValue = "localhost", description = "Server host")
     String host;
 
-    @Option(names = {"--port"}, defaultValue = "9090", description = "Server gRPC port")
+    @Option(names = {"--port"}, defaultValue = "8080", description = "Server HTTP port")
     int port;
 
     public static void main(String[] args) {
@@ -46,19 +48,65 @@ public class JavaDuckerClient implements Runnable {
         CommandLine.usage(this, System.out);
     }
 
-    static JavaDuckerGrpc.JavaDuckerBlockingStub createStub(String host, int port) {
-        ManagedChannel channel = ManagedChannelBuilder.forAddress(host, port)
-                .usePlaintext()
-                .build();
-        return JavaDuckerGrpc.newBlockingStub(channel);
+    static final ObjectMapper MAPPER = new ObjectMapper();
+
+    static String baseUrl(JavaDuckerClient p) {
+        return "http://" + p.host + ":" + p.port + "/api";
     }
 
-    static void shutdownChannel(JavaDuckerGrpc.JavaDuckerBlockingStub stub) {
-        try {
-            ((ManagedChannel) stub.getChannel()).shutdown().awaitTermination(5, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    static HttpClient http() {
+        return HttpClient.newHttpClient();
+    }
+
+    static Map<String, Object> get(String url) throws Exception {
+        var resp = http().send(
+                HttpRequest.newBuilder().uri(URI.create(url)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() == 404) throw new RuntimeException("Not found");
+        if (resp.statusCode() >= 400)
+            throw new RuntimeException("HTTP " + resp.statusCode() + ": " + resp.body());
+        return MAPPER.readValue(resp.body(), new TypeReference<>() {});
+    }
+
+    static Map<String, Object> post(String url, Object body) throws Exception {
+        String json = MAPPER.writeValueAsString(body);
+        var resp = http().send(
+                HttpRequest.newBuilder().uri(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json)).build(),
+                HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 400)
+            throw new RuntimeException("HTTP " + resp.statusCode() + ": " + resp.body());
+        return MAPPER.readValue(resp.body(), new TypeReference<>() {});
+    }
+
+    static Map<String, Object> upload(String url, Path path) throws Exception {
+        byte[] content = Files.readAllBytes(path);
+        String mediaType = Files.probeContentType(path);
+        if (mediaType == null) mediaType = "application/octet-stream";
+        String fileName = path.getFileName().toString();
+        String boundary = "----JavaDuckerBoundary" + System.currentTimeMillis();
+
+        var baos = new ByteArrayOutputStream();
+        baos.write(("--" + boundary + "\r\n").getBytes());
+        baos.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName + "\"\r\n").getBytes());
+        baos.write(("Content-Type: " + mediaType + "\r\n\r\n").getBytes());
+        baos.write(content);
+        baos.write("\r\n".getBytes());
+        baos.write(("--" + boundary + "\r\n").getBytes());
+        baos.write("Content-Disposition: form-data; name=\"originalClientPath\"\r\n\r\n".getBytes());
+        baos.write(path.toAbsolutePath().toString().getBytes());
+        baos.write("\r\n".getBytes());
+        baos.write(("--" + boundary + "--\r\n").getBytes());
+
+        var resp = http().send(
+                HttpRequest.newBuilder().uri(URI.create(url))
+                        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray())).build(),
+                HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 400)
+            throw new RuntimeException("HTTP " + resp.statusCode() + ": " + resp.body());
+        return MAPPER.readValue(resp.body(), new TypeReference<>() {});
     }
 
     // ── health ──────────────────────────────────────────────
@@ -68,16 +116,13 @@ public class JavaDuckerClient implements Runnable {
 
         @Override
         public void run() {
-            var stub = createStub(parent.host, parent.port);
             try {
-                HealthResponse resp = stub.health(HealthRequest.getDefaultInstance());
-                System.out.println("Status:  " + resp.getStatus());
-                System.out.println("Version: " + resp.getVersion());
-            } catch (StatusRuntimeException e) {
-                System.err.println("Error: " + e.getStatus().getDescription());
+                Map<String, Object> resp = get(baseUrl(parent) + "/health");
+                System.out.println("Status:  " + resp.get("status"));
+                System.out.println("Version: " + resp.get("version"));
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
                 System.exit(1);
-            } finally {
-                shutdownChannel(stub);
             }
         }
     }
@@ -97,30 +142,13 @@ public class JavaDuckerClient implements Runnable {
                 System.err.println("File not found: " + filePath);
                 System.exit(1);
             }
-            var stub = createStub(parent.host, parent.port);
             try {
-                byte[] content = Files.readAllBytes(path);
-                String mediaType = Files.probeContentType(path);
-                if (mediaType == null) mediaType = "application/octet-stream";
-
-                UploadFileResponse resp = stub.uploadFile(UploadFileRequest.newBuilder()
-                        .setFileName(path.getFileName().toString())
-                        .setOriginalClientPath(path.toAbsolutePath().toString())
-                        .setMediaType(mediaType)
-                        .setSizeBytes(content.length)
-                        .setContent(ByteString.copyFrom(content))
-                        .build());
-
-                System.out.println("Artifact ID: " + resp.getArtifactId());
-                System.out.println("Status:      " + resp.getStatus());
-            } catch (IOException e) {
-                System.err.println("Error reading file: " + e.getMessage());
+                Map<String, Object> resp = upload(baseUrl(parent) + "/upload", path);
+                System.out.println("Artifact ID: " + resp.get("artifact_id"));
+                System.out.println("Status:      " + resp.get("status"));
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
                 System.exit(1);
-            } catch (StatusRuntimeException e) {
-                System.err.println("Server error: " + e.getStatus().getDescription());
-                System.exit(1);
-            } finally {
-                shutdownChannel(stub);
             }
         }
     }
@@ -146,7 +174,6 @@ public class JavaDuckerClient implements Runnable {
             }
 
             Set<String> exts = Set.of(extensions.toLowerCase().split(","));
-            var stub = createStub(parent.host, parent.port);
             int uploaded = 0, skipped = 0, failed = 0;
 
             try (Stream<Path> walk = Files.walk(root)) {
@@ -158,20 +185,9 @@ public class JavaDuckerClient implements Runnable {
                         skipped++;
                         continue;
                     }
-
                     try {
-                        byte[] content = Files.readAllBytes(file);
-                        String mediaType = Files.probeContentType(file);
-                        if (mediaType == null) mediaType = "application/octet-stream";
-
-                        UploadFileResponse resp = stub.uploadFile(UploadFileRequest.newBuilder()
-                                .setFileName(file.getFileName().toString())
-                                .setOriginalClientPath(file.toAbsolutePath().toString())
-                                .setMediaType(mediaType)
-                                .setSizeBytes(content.length)
-                                .setContent(ByteString.copyFrom(content))
-                                .build());
-                        System.out.println("  Uploaded: " + file + " -> " + resp.getArtifactId());
+                        Map<String, Object> resp = upload(baseUrl(parent) + "/upload", file);
+                        System.out.println("  Uploaded: " + file + " -> " + resp.get("artifact_id"));
                         uploaded++;
                     } catch (Exception e) {
                         System.err.println("  Failed:   " + file + " (" + e.getMessage() + ")");
@@ -181,8 +197,6 @@ public class JavaDuckerClient implements Runnable {
             } catch (IOException e) {
                 System.err.println("Error scanning directory: " + e.getMessage());
                 System.exit(1);
-            } finally {
-                shutdownChannel(stub);
             }
 
             System.out.println("\nSummary:");
@@ -208,35 +222,32 @@ public class JavaDuckerClient implements Runnable {
         int maxResults;
 
         @Override
+        @SuppressWarnings("unchecked")
         public void run() {
-            SearchMode searchMode = switch (mode.toLowerCase()) {
-                case "exact" -> SearchMode.EXACT;
-                case "semantic" -> SearchMode.SEMANTIC;
-                default -> SearchMode.HYBRID;
-            };
-
-            var stub = createStub(parent.host, parent.port);
             try {
-                FindResponse resp = stub.find(FindRequest.newBuilder()
-                        .setPhrase(phrase)
-                        .setMode(searchMode)
-                        .setMaxResults(maxResults)
-                        .build());
+                Map<String, Object> resp = post(baseUrl(parent) + "/search",
+                        Map.of("phrase", phrase, "mode", mode, "max_results", maxResults));
 
-                System.out.println("Results: " + resp.getTotalResults());
+                System.out.println("Results: " + resp.get("total_results"));
                 System.out.println();
-                for (int i = 0; i < resp.getResultsCount(); i++) {
-                    SearchResult r = resp.getResults(i);
-                    System.out.printf("#%d [%s] score=%.4f  file=%s  chunk=%d%n",
-                            i + 1, r.getMatchType(), r.getScore(), r.getFileName(), r.getChunkIndex());
-                    System.out.println("    " + r.getPreview().replace("\n", "\n    "));
-                    System.out.println();
+                List<Map<String, Object>> results = (List<Map<String, Object>>) resp.get("results");
+                if (results != null) {
+                    for (int i = 0; i < results.size(); i++) {
+                        Map<String, Object> r = results.get(i);
+                        System.out.printf("#%d [%s] score=%.4f  file=%s  chunk=%s%n",
+                                i + 1, r.get("match_type"),
+                                ((Number) r.get("score")).doubleValue(),
+                                r.get("file_name"), r.get("chunk_index"));
+                        String preview = (String) r.get("preview");
+                        if (preview != null) {
+                            System.out.println("    " + preview.replace("\n", "\n    "));
+                        }
+                        System.out.println();
+                    }
                 }
-            } catch (StatusRuntimeException e) {
-                System.err.println("Error: " + e.getStatus().getDescription());
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
                 System.exit(1);
-            } finally {
-                shutdownChannel(stub);
             }
         }
     }
@@ -251,20 +262,16 @@ public class JavaDuckerClient implements Runnable {
 
         @Override
         public void run() {
-            var stub = createStub(parent.host, parent.port);
             try {
-                GetArtifactTextResponse resp = stub.getArtifactText(
-                        GetArtifactTextRequest.newBuilder().setArtifactId(artifactId).build());
-                System.out.println("Artifact:   " + resp.getArtifactId());
-                System.out.println("Method:     " + resp.getExtractionMethod());
-                System.out.println("Length:     " + resp.getTextLength());
+                Map<String, Object> resp = get(baseUrl(parent) + "/text/" + artifactId);
+                System.out.println("Artifact:   " + resp.get("artifact_id"));
+                System.out.println("Method:     " + resp.get("extraction_method"));
+                System.out.println("Length:     " + resp.get("text_length"));
                 System.out.println("---");
-                System.out.println(resp.getExtractedText());
-            } catch (StatusRuntimeException e) {
-                System.err.println("Error: " + e.getStatus().getDescription());
+                System.out.println(resp.get("extracted_text"));
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
                 System.exit(1);
-            } finally {
-                shutdownChannel(stub);
             }
         }
     }
@@ -279,26 +286,24 @@ public class JavaDuckerClient implements Runnable {
 
         @Override
         public void run() {
-            var stub = createStub(parent.host, parent.port);
             try {
-                GetArtifactStatusResponse resp = stub.getArtifactStatus(
-                        GetArtifactStatusRequest.newBuilder().setArtifactId(artifactId).build());
-                System.out.println("Artifact: " + resp.getArtifactId());
-                System.out.println("File:     " + resp.getFileName());
-                System.out.println("Status:   " + resp.getStatus());
-                if (!resp.getErrorMessage().isEmpty()) {
-                    System.out.println("Error:    " + resp.getErrorMessage());
+                Map<String, Object> resp = get(baseUrl(parent) + "/status/" + artifactId);
+                System.out.println("Artifact: " + resp.get("artifact_id"));
+                System.out.println("File:     " + resp.get("file_name"));
+                System.out.println("Status:   " + resp.get("status"));
+                Object err = resp.get("error_message");
+                if (err != null && !err.toString().isEmpty()) {
+                    System.out.println("Error:    " + err);
                 }
-                System.out.println("Created:  " + resp.getCreatedAt());
-                System.out.println("Updated:  " + resp.getUpdatedAt());
-                if (!resp.getIndexedAt().isEmpty()) {
-                    System.out.println("Indexed:  " + resp.getIndexedAt());
+                System.out.println("Created:  " + resp.get("created_at"));
+                System.out.println("Updated:  " + resp.get("updated_at"));
+                Object indexedAt = resp.get("indexed_at");
+                if (indexedAt != null && !indexedAt.toString().isEmpty()) {
+                    System.out.println("Indexed:  " + indexedAt);
                 }
-            } catch (StatusRuntimeException e) {
-                System.err.println("Error: " + e.getStatus().getDescription());
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
                 System.exit(1);
-            } finally {
-                shutdownChannel(stub);
             }
         }
     }
@@ -309,26 +314,24 @@ public class JavaDuckerClient implements Runnable {
         @CommandLine.ParentCommand JavaDuckerClient parent;
 
         @Override
+        @SuppressWarnings("unchecked")
         public void run() {
-            var stub = createStub(parent.host, parent.port);
             try {
-                StatsResponse resp = stub.stats(StatsRequest.getDefaultInstance());
-                System.out.println("Total artifacts:   " + resp.getTotalArtifacts());
-                System.out.println("Indexed:           " + resp.getIndexedArtifacts());
-                System.out.println("Failed:            " + resp.getFailedArtifacts());
-                System.out.println("Pending:           " + resp.getPendingArtifacts());
-                System.out.println("Total chunks:      " + resp.getTotalChunks());
-                System.out.println("Total bytes:       " + resp.getTotalBytes());
-                if (!resp.getArtifactsByStatusMap().isEmpty()) {
+                Map<String, Object> resp = get(baseUrl(parent) + "/stats");
+                System.out.println("Total artifacts:   " + resp.get("total_artifacts"));
+                System.out.println("Indexed:           " + resp.get("indexed_artifacts"));
+                System.out.println("Failed:            " + resp.get("failed_artifacts"));
+                System.out.println("Pending:           " + resp.get("pending_artifacts"));
+                System.out.println("Total chunks:      " + resp.get("total_chunks"));
+                System.out.println("Total bytes:       " + resp.get("total_bytes"));
+                Map<String, Object> byStatus = (Map<String, Object>) resp.get("artifacts_by_status");
+                if (byStatus != null && !byStatus.isEmpty()) {
                     System.out.println("By status:");
-                    resp.getArtifactsByStatusMap().forEach((k, v) ->
-                            System.out.println("  " + k + ": " + v));
+                    byStatus.forEach((k, v) -> System.out.println("  " + k + ": " + v));
                 }
-            } catch (StatusRuntimeException e) {
-                System.err.println("Error: " + e.getStatus().getDescription());
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
                 System.exit(1);
-            } finally {
-                shutdownChannel(stub);
             }
         }
     }

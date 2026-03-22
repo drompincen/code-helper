@@ -1,12 +1,12 @@
 # JavaDucker v2
 
-Code search and retrieval server with gRPC API, DuckDB persistence, and background ingestion.
+Code search and retrieval server with REST API, DuckDB persistence, and background ingestion.
 Upload source files, index them into searchable chunks, and find content via exact, semantic, or hybrid search.
 
 ## Tech Stack
 
 - **Java 21** + **Spring Boot 3.2**
-- **gRPC** (net.devh grpc-spring-boot-starter)
+- **REST API** (Spring MVC)
 - **DuckDB** file-based persistence (JDBC)
 - **picocli** CLI client
 - **Apache PDFBox** for PDF extraction
@@ -32,7 +32,7 @@ mvn package -DskipTests
 # or:
 java -jar target/javaducker-1.0.0.jar \
   --javaducker.db-path=data/javaducker.duckdb \
-  --grpc.server.port=9090 \
+  --server.port=8080 \
   --javaducker.intake-dir=temp/intake
 ```
 
@@ -40,31 +40,31 @@ java -jar target/javaducker-1.0.0.jar \
 
 ```bash
 # Check health
-./run-client.sh --host localhost --port 9090 health
+./run-client.sh --host localhost --port 8080 health
 
 # Upload one file
-./run-client.sh --host localhost --port 9090 upload-file --file ./docs/architecture.md
+./run-client.sh --host localhost --port 8080 upload-file --file ./docs/architecture.md
 
 # Upload a directory
-./run-client.sh --host localhost --port 9090 upload-dir --root ./repo --ext .java,.xml,.md,.yml,.pdf
+./run-client.sh --host localhost --port 8080 upload-dir --root ./repo --ext .java,.xml,.md,.yml,.pdf
 
 # Check ingestion status
-./run-client.sh --host localhost --port 9090 status --id <artifact-id>
+./run-client.sh --host localhost --port 8080 status --id <artifact-id>
 
 # Exact search
-./run-client.sh --host localhost --port 9090 find --phrase "@Transactional" --mode exact
+./run-client.sh --host localhost --port 8080 find --phrase "@Transactional" --mode exact
 
 # Semantic search
-./run-client.sh --host localhost --port 9090 find --phrase "how onboarding approvals are coordinated" --mode semantic
+./run-client.sh --host localhost --port 8080 find --phrase "how onboarding approvals are coordinated" --mode semantic
 
 # Hybrid search (default)
-./run-client.sh --host localhost --port 9090 find --phrase "material change monitoring" --mode hybrid
+./run-client.sh --host localhost --port 8080 find --phrase "material change monitoring" --mode hybrid
 
 # Retrieve extracted text
-./run-client.sh --host localhost --port 9090 cat --id <artifact-id>
+./run-client.sh --host localhost --port 8080 cat --id <artifact-id>
 
 # View stats
-./run-client.sh --host localhost --port 9090 stats
+./run-client.sh --host localhost --port 8080 stats
 ```
 
 ## MCP Server (Claude Code Integration)
@@ -91,9 +91,9 @@ JavaDucker ships a JBang-based MCP server (`JavaDuckerMcpServer.java`) that expo
 
 3. Optionally set environment variables to override defaults:
    ```
-   GRPC_HOST=localhost    (default: localhost)
-   GRPC_PORT=9090        (default: 9090)
-   PROJECT_ROOT=.        (default: .)
+   JAVADUCKER_HOST=localhost    (default: localhost)
+   HTTP_PORT=8080               (default: 8080)
+   PROJECT_ROOT=.               (default: .)
    ```
 
 ### MCP Tools
@@ -129,7 +129,7 @@ javaducker_get_file_text  artifact_id=<id from search>
 The `.cmd` scripts pin `JAVA_HOME` to the bundled x86_64 JDK (runs in emulation on ARM64 Windows):
 
 ```cmd
-run-server.cmd    # builds if needed, starts gRPC server on port 9090
+run-server.cmd    # builds if needed, starts HTTP server on port 8080
 run-mcp.cmd       # starts the MCP stdio server via JBang
 ```
 
@@ -138,7 +138,7 @@ run-mcp.cmd       # starts the MCP stdio server via JBang
 ```
 Client (CLI)                    Server (Spring Boot)
 ┌──────────────┐               ┌──────────────────────────────────┐
-│  picocli     │    gRPC       │  gRPC Service                    │
+│  picocli     │    REST       │  REST Controller                 │
 │  commands    │───────────────│  UploadService                   │
 │              │               │  ArtifactService                 │
 │  health      │               │  SearchService                   │
@@ -194,23 +194,22 @@ RECEIVED → STORED_IN_INTAKE → PARSING → CHUNKED → EMBEDDED → INDEXED
 | `javaducker.ingestion-poll-seconds` | `5` | Background worker poll interval |
 | `javaducker.ingestion-worker-threads` | `4` | Thread pool size for parallel ingestion |
 | `javaducker.max-search-results` | `20` | Default max search results |
-| `grpc.server.port` | `9090` | gRPC server port |
+| `server.port` | `8080` | HTTP server port |
 
-## gRPC API
+## REST API
 
-| RPC | Description |
-|-----|-------------|
-| `Health` | Server health check |
-| `Stats` | Artifact/chunk counts and status breakdown |
-| `UploadFile` | Upload a single file (bytes + metadata) |
-| `GetArtifactStatus` | Query artifact ingestion status |
-| `GetArtifactText` | Retrieve extracted text for an artifact |
-| `Find` | Search chunks (exact, semantic, or hybrid mode) |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Server health check |
+| `POST` | `/api/upload` | Upload a single file (multipart/form-data) |
+| `GET` | `/api/status/{id}` | Query artifact ingestion status |
+| `GET` | `/api/text/{id}` | Retrieve extracted text for an artifact |
+| `POST` | `/api/search` | Search chunks — JSON body: `{"phrase":"...", "mode":"hybrid", "max_results":20}` |
+| `GET` | `/api/stats` | Artifact/chunk counts and status breakdown |
 
 ## Testing
 
 ```bash
-# Run all 53 tests
 mvn test
 ```
 
@@ -219,20 +218,20 @@ mvn test
 - **Schema**: Table creation, idempotency, dedup index
 - **Integration**: Full upload → ingest → exact/semantic/hybrid search flow, dedup, error handling
 - **Parallel**: Concurrent ingestion via thread pool
+- **REST**: Controller smoke tests (MockMvc)
 
 ## Project Structure
 
 ```
 src/
 ├── main/
-│   ├── proto/javaducker.proto          # gRPC service definition
 │   ├── java/com/javaducker/
 │   │   ├── server/
 │   │   │   ├── JavaDuckerServerApp.java
 │   │   │   ├── config/AppConfig.java
 │   │   │   ├── db/DuckDBDataSource.java
 │   │   │   ├── db/SchemaBootstrap.java
-│   │   │   ├── grpc/JavaDuckerGrpcService.java
+│   │   │   ├── rest/JavaDuckerRestController.java
 │   │   │   ├── service/UploadService.java
 │   │   │   ├── service/ArtifactService.java
 │   │   │   ├── service/SearchService.java
@@ -250,6 +249,7 @@ src/
 │       ├── server/ingestion/*Test.java
 │       ├── server/service/*Test.java
 │       ├── server/db/*Test.java
+│       ├── server/rest/JavaDuckerRestControllerTest.java
 │       └── integration/FullFlowIntegrationTest.java
 test-corpus/                             # Sample files for manual testing
 docs/wizard/                             # Interactive HTML presentation

@@ -10,12 +10,12 @@ fi
 
 # Default args
 DB="${DB:-data/javaducker.duckdb}"
-GRPC_PORT="${GRPC_PORT:-9090}"
+HTTP_PORT="${HTTP_PORT:-8080}"
 INTAKE_DIR="${INTAKE_DIR:-temp/intake}"
 
-echo "Starting JavaDucker Server on gRPC port $GRPC_PORT"
+echo "Starting JavaDucker Server on HTTP port $HTTP_PORT"
 java -jar target/javaducker-1.0.0.jar \
     --javaducker.db-path="$DB" \
-    --grpc.server.port="$GRPC_PORT" \
+    --server.port="$HTTP_PORT" \
     --javaducker.intake-dir="$INTAKE_DIR" \
     "$@"

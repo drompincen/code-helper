@@ -1,49 +1,36 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 21
 //DEPS io.modelcontextprotocol.sdk:mcp:1.1.0
-//DEPS io.grpc:grpc-netty-shaded:1.63.0
-//DEPS io.grpc:grpc-protobuf:1.63.0
-//DEPS io.grpc:grpc-stub:1.63.0
-//DEPS com.google.protobuf:protobuf-java:3.25.3
-//DEPS javax.annotation:javax.annotation-api:1.3.2
 //DEPS org.slf4j:slf4j-nop:2.0.16
-//CP target/classes
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.protobuf.ByteString;
-import com.javaducker.proto.*;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 import io.modelcontextprotocol.sdk.McpSchema;
 import io.modelcontextprotocol.sdk.McpServer;
 import io.modelcontextprotocol.sdk.server.transport.StdioServerTransportProvider;
 
+import java.io.ByteArrayOutputStream;
 import java.net.Socket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 public class JavaDuckerMcpServer {
 
-    static final String HOST = System.getenv().getOrDefault("GRPC_HOST", "localhost");
-    static final int PORT = Integer.parseInt(System.getenv().getOrDefault("GRPC_PORT", "9090"));
+    static final String HOST = System.getenv().getOrDefault("JAVADUCKER_HOST", "localhost");
+    static final int PORT = Integer.parseInt(System.getenv().getOrDefault("HTTP_PORT", "8080"));
     static final String PROJECT_ROOT = System.getenv().getOrDefault("PROJECT_ROOT", ".");
+    static final String BASE_URL = "http://" + HOST + ":" + PORT + "/api";
     static final ObjectMapper MAPPER = new ObjectMapper();
-
-    static ManagedChannel channel;
-    static JavaDuckerGrpc.JavaDuckerBlockingStub stub;
+    static final HttpClient HTTP = HttpClient.newHttpClient();
 
     public static void main(String[] args) throws Exception {
         ensureServerRunning();
-
-        channel = ManagedChannelBuilder.forAddress(HOST, PORT).usePlaintext().build();
-        stub = JavaDuckerGrpc.newBlockingStub(channel);
-
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            try { channel.shutdown().awaitTermination(5, TimeUnit.SECONDS); } catch (Exception ignored) {}
-        }));
 
         McpServer.sync(new StdioServerTransportProvider(MAPPER))
             .serverInfo("javaducker", "1.0.0")
@@ -129,25 +116,12 @@ public class JavaDuckerMcpServer {
 
     // ── Tool implementations ──────────────────────────────────────────────────
 
-    static Map<String, Object> health() {
-        HealthResponse r = stub.health(HealthRequest.getDefaultInstance());
-        return Map.of("status", r.getStatus(), "version", r.getVersion());
+    static Map<String, Object> health() throws Exception {
+        return httpGet("/health");
     }
 
     static Map<String, Object> indexFile(String filePath) throws Exception {
-        Path path = Path.of(filePath);
-        byte[] content = Files.readAllBytes(path);
-        String mediaType = Files.probeContentType(path);
-        if (mediaType == null) mediaType = "application/octet-stream";
-
-        UploadFileResponse r = stub.uploadFile(UploadFileRequest.newBuilder()
-            .setFileName(path.getFileName().toString())
-            .setOriginalClientPath(path.toAbsolutePath().toString())
-            .setMediaType(mediaType)
-            .setSizeBytes(content.length)
-            .setContent(ByteString.copyFrom(content))
-            .build());
-        return Map.of("artifact_id", r.getArtifactId(), "status", r.getStatus());
+        return httpUpload(Path.of(filePath));
     }
 
     static final Set<String> EXCLUDED_DIRS = Set.of(
@@ -172,7 +146,6 @@ public class JavaDuckerMcpServer {
                 (Files.isRegularFile(p) || EXCLUDED_DIRS.stream().noneMatch(
                     ex -> p.getFileName() != null && p.getFileName().toString().equals(ex))))) {
             for (Path file : walk.filter(Files::isRegularFile).toList()) {
-                // Skip files inside excluded directories anywhere in the path
                 boolean inExcluded = false;
                 for (Path part : file) {
                     if (EXCLUDED_DIRS.contains(part.toString())) { inExcluded = true; break; }
@@ -183,17 +156,8 @@ public class JavaDuckerMcpServer {
                 String ext = name.contains(".") ? name.substring(name.lastIndexOf('.')) : "";
                 if (!exts.contains(ext)) { skipped[0]++; continue; }
                 try {
-                    byte[] content = Files.readAllBytes(file);
-                    String mediaType = Files.probeContentType(file);
-                    if (mediaType == null) mediaType = "application/octet-stream";
-                    UploadFileResponse r = stub.uploadFile(UploadFileRequest.newBuilder()
-                        .setFileName(file.getFileName().toString())
-                        .setOriginalClientPath(file.toAbsolutePath().toString())
-                        .setMediaType(mediaType)
-                        .setSizeBytes(content.length)
-                        .setContent(ByteString.copyFrom(content))
-                        .build());
-                    uploaded.add(Map.of("file", file.toString(), "artifact_id", r.getArtifactId()));
+                    Map<String, Object> r = httpUpload(file);
+                    uploaded.add(Map.of("file", file.toString(), "artifact_id", (String) r.get("artifact_id")));
                 } catch (Exception e) { failed[0]++; }
             }
         }
@@ -202,65 +166,32 @@ public class JavaDuckerMcpServer {
             "summary", Map.of("uploaded", uploaded.size(), "skipped", skipped[0], "failed", failed[0]));
     }
 
-    static Map<String, Object> search(String phrase, String mode, int maxResults) {
-        SearchMode searchMode = switch (mode.toLowerCase()) {
-            case "exact"    -> SearchMode.EXACT;
-            case "semantic" -> SearchMode.SEMANTIC;
-            default         -> SearchMode.HYBRID;
-        };
-        FindResponse r = stub.find(FindRequest.newBuilder()
-            .setPhrase(phrase).setMode(searchMode).setMaxResults(maxResults).build());
-
-        List<Map<String, Object>> results = new ArrayList<>();
-        for (int i = 0; i < r.getResultsCount(); i++) {
-            SearchResult sr = r.getResults(i);
-            results.add(Map.of(
-                "rank",        i + 1,
-                "match_type",  sr.getMatchType(),
-                "score",       sr.getScore(),
-                "file",        sr.getFileName(),
-                "artifact_id", sr.getArtifactId(),
-                "chunk_index", sr.getChunkIndex(),
-                "preview",     sr.getPreview()));
-        }
-        return Map.of("total_results", r.getTotalResults(), "results", results);
+    static Map<String, Object> search(String phrase, String mode, int maxResults) throws Exception {
+        return httpPost("/search", Map.of("phrase", phrase, "mode", mode, "max_results", maxResults));
     }
 
-    static Map<String, Object> getFileText(String artifactId) {
-        GetArtifactTextResponse r = stub.getArtifactText(
-            GetArtifactTextRequest.newBuilder().setArtifactId(artifactId).build());
-        return Map.of(
-            "artifact_id",       r.getArtifactId(),
-            "extraction_method", r.getExtractionMethod(),
-            "text_length",       r.getTextLength(),
-            "text",              r.getExtractedText());
+    static Map<String, Object> getFileText(String artifactId) throws Exception {
+        Map<String, Object> r = httpGet("/text/" + artifactId);
+        if (r == null) throw new RuntimeException("Artifact not found: " + artifactId);
+        return r;
     }
 
-    static Map<String, Object> getArtifactStatus(String artifactId) {
-        GetArtifactStatusResponse r = stub.getArtifactStatus(
-            GetArtifactStatusRequest.newBuilder().setArtifactId(artifactId).build());
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("artifact_id", r.getArtifactId());
-        result.put("file",        r.getFileName());
-        result.put("status",      r.getStatus());
-        result.put("error",       r.getErrorMessage());
-        result.put("created_at",  r.getCreatedAt());
-        result.put("updated_at",  r.getUpdatedAt());
-        result.put("indexed_at",  r.getIndexedAt());
-        return result;
+    static Map<String, Object> getArtifactStatus(String artifactId) throws Exception {
+        Map<String, Object> r = httpGet("/status/" + artifactId);
+        if (r == null) throw new RuntimeException("Artifact not found: " + artifactId);
+        return r;
     }
 
     static Map<String, Object> waitForIndexed(String artifactId, int timeoutSeconds) throws Exception {
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
         long start = System.currentTimeMillis();
         while (System.currentTimeMillis() < deadline) {
-            GetArtifactStatusResponse r = stub.getArtifactStatus(
-                GetArtifactStatusRequest.newBuilder().setArtifactId(artifactId).build());
-            String status = r.getStatus();
+            Map<String, Object> r = getArtifactStatus(artifactId);
+            String status = (String) r.get("status");
             if ("INDEXED".equals(status) || "FAILED".equals(status)) {
                 return Map.of(
-                    "artifact_id",    artifactId,
-                    "final_status",   status,
+                    "artifact_id",     artifactId,
+                    "final_status",    status,
                     "elapsed_seconds", (System.currentTimeMillis() - start) / 1000.0);
             }
             Thread.sleep(3000);
@@ -269,17 +200,64 @@ public class JavaDuckerMcpServer {
             "Artifact " + artifactId + " did not reach INDEXED within " + timeoutSeconds + "s");
     }
 
-    static Map<String, Object> stats() {
-        StatsResponse r = stub.stats(StatsRequest.getDefaultInstance());
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("total_artifacts", r.getTotalArtifacts());
-        result.put("indexed",         r.getIndexedArtifacts());
-        result.put("failed",          r.getFailedArtifacts());
-        result.put("pending",         r.getPendingArtifacts());
-        result.put("total_chunks",    r.getTotalChunks());
-        result.put("total_bytes",     r.getTotalBytes());
-        result.put("by_status",       r.getArtifactsByStatusMap());
-        return result;
+    static Map<String, Object> stats() throws Exception {
+        return httpGet("/stats");
+    }
+
+    // ── HTTP helpers ──────────────────────────────────────────────────────────
+
+    static Map<String, Object> httpGet(String path) throws Exception {
+        var req = HttpRequest.newBuilder()
+            .uri(URI.create(BASE_URL + path))
+            .GET().build();
+        var resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() == 404) return null;
+        if (resp.statusCode() >= 400)
+            throw new RuntimeException("HTTP " + resp.statusCode() + ": " + resp.body());
+        return MAPPER.readValue(resp.body(), new TypeReference<>() {});
+    }
+
+    static Map<String, Object> httpPost(String path, Object body) throws Exception {
+        String json = MAPPER.writeValueAsString(body);
+        var req = HttpRequest.newBuilder()
+            .uri(URI.create(BASE_URL + path))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(json))
+            .build();
+        var resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 400)
+            throw new RuntimeException("HTTP " + resp.statusCode() + ": " + resp.body());
+        return MAPPER.readValue(resp.body(), new TypeReference<>() {});
+    }
+
+    static Map<String, Object> httpUpload(Path path) throws Exception {
+        byte[] content = Files.readAllBytes(path);
+        String mediaType = Files.probeContentType(path);
+        if (mediaType == null) mediaType = "application/octet-stream";
+        String fileName = path.getFileName().toString();
+        String boundary = "----JavaDuckerBoundary" + System.currentTimeMillis();
+
+        var baos = new ByteArrayOutputStream();
+        baos.write(("--" + boundary + "\r\n").getBytes());
+        baos.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName + "\"\r\n").getBytes());
+        baos.write(("Content-Type: " + mediaType + "\r\n\r\n").getBytes());
+        baos.write(content);
+        baos.write("\r\n".getBytes());
+        baos.write(("--" + boundary + "\r\n").getBytes());
+        baos.write("Content-Disposition: form-data; name=\"originalClientPath\"\r\n\r\n".getBytes());
+        baos.write(path.toAbsolutePath().toString().getBytes());
+        baos.write("\r\n".getBytes());
+        baos.write(("--" + boundary + "--\r\n").getBytes());
+
+        var req = HttpRequest.newBuilder()
+            .uri(URI.create(BASE_URL + "/upload"))
+            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+            .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray()))
+            .build();
+        var resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 400)
+            throw new RuntimeException("HTTP " + resp.statusCode() + ": " + resp.body());
+        return MAPPER.readValue(resp.body(), new TypeReference<>() {});
     }
 
     // ── Server lifecycle ──────────────────────────────────────────────────────
@@ -346,7 +324,6 @@ public class JavaDuckerMcpServer {
         return Map.of("type", "integer", "description", description);
     }
 
-    /** Build a properties map alternating key, value pairs. */
     @SuppressWarnings("unchecked")
     static Map<String, Object> props(Object... pairs) {
         Map<String, Object> m = new LinkedHashMap<>();
