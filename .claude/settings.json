@@ -1,43 +1,65 @@
 {
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/edit-log.sh\"",
+            "timeout": 3000
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/track-agents.sh\"",
+            "timeout": 3000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/memory-sync.sh\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-end.sh\"",
+            "timeout": 3000
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/statusline.sh\""
+  },
   "permissions": {
     "allow": [
-      "Bash(mkdir:*)",
-      "Bash(ls:*)",
-      "Bash(git:*)",
-      "Bash(java:*)",
-      "Bash(javac:*)",
-      "Bash(jbang:*)",
-      "Bash(mvn:*)",
-      "Bash(gradle:*)",
-      "Bash(chmod:*)",
-      "Bash(cp:*)",
-      "Bash(mv:*)",
-      "Bash(rm:*)",
-      "Bash(touch:*)",
-      "Bash(curl:*)",
-      "Bash(wget:*)",
-      "Bash(tar:*)",
-      "Bash(unzip:*)",
-      "Bash(which:*)",
-      "Bash(pwd:*)",
-      "Bash(cat:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(wc:*)",
-      "Bash(find:*)",
-      "Bash(tree:*)",
-      "Bash(echo:*)",
-      "Bash(sed:*)",
-      "Bash(protoc:*)",
-      "Read",
-      "Edit",
-      "Write",
-      "Glob",
-      "Grep",
-      "Agent",
-      "WebFetch",
-      "WebSearch"
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "MultiEdit(*)"
     ],
-    "deny": []
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)"
+    ]
   }
 }
