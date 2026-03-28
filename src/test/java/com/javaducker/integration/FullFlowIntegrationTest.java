@@ -52,8 +52,8 @@ class FullFlowIntegrationTest {
         config.setEmbeddingDim(128);
 
         dataSource = new DuckDBDataSource(config);
-        uploadService = new UploadService(dataSource, config);
         artifactService = new ArtifactService(dataSource);
+        uploadService = new UploadService(dataSource, config, artifactService);
         textExtractor = new TextExtractor();
         textNormalizer = new TextNormalizer();
         chunker = new Chunker();
@@ -61,7 +61,8 @@ class FullFlowIntegrationTest {
         searchService = new SearchService(dataSource, embeddingService, config);
         statsService = new StatsService(dataSource);
         ingestionWorker = new IngestionWorker(dataSource, artifactService,
-                textExtractor, textNormalizer, chunker, embeddingService, config);
+                textExtractor, textNormalizer, chunker, embeddingService,
+                new FileSummarizer(), new ImportParser(), searchService, config);
 
         schemaBootstrap = new SchemaBootstrap(dataSource, config, ingestionWorker);
         schemaBootstrap.bootstrap();

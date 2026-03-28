@@ -25,17 +25,27 @@ public class UploadService {
     private static final Logger log = LoggerFactory.getLogger(UploadService.class);
     private final DuckDBDataSource dataSource;
     private final AppConfig config;
+    private final ArtifactService artifactService;
 
-    public UploadService(DuckDBDataSource dataSource, AppConfig config) {
+    public UploadService(DuckDBDataSource dataSource, AppConfig config, ArtifactService artifactService) {
         this.dataSource = dataSource;
         this.config = config;
+        this.artifactService = artifactService;
     }
 
     public String upload(String fileName, String originalClientPath, String mediaType,
                          long sizeBytes, byte[] content) throws IOException, SQLException {
         String existing = findExisting(fileName, originalClientPath, sizeBytes);
         if (existing != null) {
-            log.info("Dedup: returning existing artifact {} for {} ({} bytes)", existing, fileName, sizeBytes);
+            log.info("Re-indexing existing artifact {} for {} ({} bytes)", existing, fileName, sizeBytes);
+            artifactService.deleteArtifactData(existing);
+
+            Path intakePath = storeInIntake(existing, fileName, content);
+            String sha256 = computeChecksum(content);
+
+            updateArtifactForReindex(existing, sha256, sizeBytes, intakePath.toString(),
+                    fileName, mediaType, originalClientPath);
+            log.info("Reset artifact {} for re-ingestion ({}), {} bytes", existing, fileName, sizeBytes);
             return existing;
         }
 
@@ -90,6 +100,35 @@ public class UploadService {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-256 not available", e);
         }
+    }
+
+    private void updateArtifactForReindex(String artifactId, String sha256, long sizeBytes,
+                                          String intakePath, String fileName, String mediaType,
+                                          String originalClientPath) throws SQLException {
+        // DuckDB UPDATE can fail with PK constraint on ART index — use DELETE+INSERT
+        dataSource.withConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM artifacts WHERE artifact_id = ?")) {
+                ps.setString(1, artifactId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    INSERT INTO artifacts (artifact_id, file_name, media_type, original_client_path,
+                        intake_path, size_bytes, sha256, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """)) {
+                ps.setString(1, artifactId);
+                ps.setString(2, fileName);
+                ps.setString(3, mediaType);
+                ps.setString(4, originalClientPath);
+                ps.setString(5, intakePath);
+                ps.setLong(6, sizeBytes);
+                ps.setString(7, sha256);
+                ps.setString(8, ArtifactStatus.STORED_IN_INTAKE.name());
+                ps.executeUpdate();
+            }
+            return null;
+        });
     }
 
     private void createArtifactRecord(String artifactId, String fileName, String mediaType,

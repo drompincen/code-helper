@@ -5,6 +5,7 @@ import com.javaducker.server.db.DuckDBDataSource;
 import com.javaducker.server.db.SchemaBootstrap;
 import com.javaducker.server.model.ArtifactStatus;
 import com.javaducker.server.service.ArtifactService;
+import com.javaducker.server.service.SearchService;
 import com.javaducker.server.service.UploadService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,10 +40,12 @@ class IngestionWorkerParallelTest {
 
         dataSource = new DuckDBDataSource(config);
         artifactService = new ArtifactService(dataSource);
-        uploadService = new UploadService(dataSource, config);
+        uploadService = new UploadService(dataSource, config, artifactService);
+        SearchService searchService = new SearchService(dataSource, new EmbeddingService(config), config);
         ingestionWorker = new IngestionWorker(dataSource, artifactService,
                 new TextExtractor(), new TextNormalizer(), new Chunker(),
-                new EmbeddingService(config), config);
+                new EmbeddingService(config), new FileSummarizer(), new ImportParser(),
+                searchService, config);
 
         SchemaBootstrap bootstrap = new SchemaBootstrap(dataSource, config, ingestionWorker);
         bootstrap.bootstrap();

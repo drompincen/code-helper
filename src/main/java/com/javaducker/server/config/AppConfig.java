@@ -15,6 +15,8 @@ public class AppConfig {
     private int ingestionPollSeconds = 5;
     private int ingestionWorkerThreads = 4;
     private int maxSearchResults = 20;
+    private boolean watchEnabled = false;
+    private String watchExtensions = ".java,.xml,.md,.yml,.json,.txt";
 
     public String getDbPath() { return dbPath; }
     public void setDbPath(String dbPath) { this.dbPath = dbPath; }
@@ -39,4 +41,10 @@ public class AppConfig {
 
     public int getMaxSearchResults() { return maxSearchResults; }
     public void setMaxSearchResults(int maxSearchResults) { this.maxSearchResults = maxSearchResults; }
+
+    public boolean isWatchEnabled() { return watchEnabled; }
+    public void setWatchEnabled(boolean watchEnabled) { this.watchEnabled = watchEnabled; }
+
+    public String getWatchExtensions() { return watchExtensions; }
+    public void setWatchExtensions(String watchExtensions) { this.watchExtensions = watchExtensions; }
 }

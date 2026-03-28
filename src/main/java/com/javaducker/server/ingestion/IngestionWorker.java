@@ -4,6 +4,7 @@ import com.javaducker.server.config.AppConfig;
 import com.javaducker.server.db.DuckDBDataSource;
 import com.javaducker.server.model.ArtifactStatus;
 import com.javaducker.server.service.ArtifactService;
+import com.javaducker.server.service.SearchService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,13 +12,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +32,7 @@ public class IngestionWorker {
     private final TextNormalizer textNormalizer;
     private final Chunker chunker;
     private final EmbeddingService embeddingService;
+    private final SearchService searchService;
     private final AppConfig config;
     private final ThreadPoolExecutor threadPool;
     private volatile boolean ready = false;
@@ -42,15 +42,24 @@ public class IngestionWorker {
     private final AtomicLong lastCompletedTasks = new AtomicLong(0);
     private volatile long lastProgressLogMs = System.currentTimeMillis();
 
+    private final FileSummarizer fileSummarizer;
+    private final ImportParser importParser;
+
     public IngestionWorker(DuckDBDataSource dataSource, ArtifactService artifactService,
                            TextExtractor textExtractor, TextNormalizer textNormalizer,
-                           Chunker chunker, EmbeddingService embeddingService, AppConfig config) {
+                           Chunker chunker, EmbeddingService embeddingService,
+                           FileSummarizer fileSummarizer, ImportParser importParser,
+                           SearchService searchService,
+                           AppConfig config) {
         this.dataSource = dataSource;
         this.artifactService = artifactService;
         this.textExtractor = textExtractor;
         this.textNormalizer = textNormalizer;
         this.chunker = chunker;
         this.embeddingService = embeddingService;
+        this.fileSummarizer = fileSummarizer;
+        this.importParser = importParser;
+        this.searchService = searchService;
         this.config = config;
         this.threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(config.getIngestionWorkerThreads());
     }
@@ -210,7 +219,7 @@ public class IngestionWorker {
 
             dataSource.withConnection(conn -> {
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "INSERT INTO artifact_chunks (chunk_id, artifact_id, chunk_index, chunk_text, char_start, char_end) VALUES (?, ?, ?, ?, ?, ?)")) {
+                        "INSERT INTO artifact_chunks (chunk_id, artifact_id, chunk_index, chunk_text, char_start, char_end, line_start, line_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
                     for (Chunker.Chunk chunk : chunks) {
                         String chunkId = artifactId + "-" + chunk.index();
                         ps.setString(1, chunkId);
@@ -219,6 +228,8 @@ public class IngestionWorker {
                         ps.setString(4, chunk.text());
                         ps.setLong(5, chunk.charStart());
                         ps.setLong(6, chunk.charEnd());
+                        ps.setInt(7, chunk.lineStart());
+                        ps.setInt(8, chunk.lineEnd());
                         ps.executeUpdate();
                     }
                 }
@@ -231,6 +242,14 @@ public class IngestionWorker {
             List<ChunkEmbedding> embeddings = new ArrayList<>(chunks.size());
             for (Chunker.Chunk chunk : chunks) {
                 embeddings.add(new ChunkEmbedding(artifactId + "-" + chunk.index(), embeddingService.embed(chunk.text())));
+            }
+
+            // Add to HNSW index if available
+            HnswIndex hnsw = searchService.getHnswIndex();
+            if (hnsw != null) {
+                for (ChunkEmbedding ce : embeddings) {
+                    hnsw.insert(ce.chunkId(), ce.embedding());
+                }
             }
 
             dataSource.withConnection(conn -> {
@@ -252,7 +271,48 @@ public class IngestionWorker {
                 return null;
             });
 
-            // Step 4: Mark indexed
+            // Step 4: Generate file summary
+            try {
+                Map<String, Object> summary = fileSummarizer.summarize(normalizedText, fileName);
+                dataSource.withConnection(conn -> {
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "INSERT INTO artifact_summaries (artifact_id, summary_text, class_names, method_names, import_count, line_count) VALUES (?, ?, ?, ?, ?, ?)")) {
+                        ps.setString(1, artifactId);
+                        ps.setString(2, (String) summary.get("summary_text"));
+                        ps.setString(3, String.join(", ", (List<String>) summary.get("class_names")));
+                        ps.setString(4, String.join(", ", (List<String>) summary.get("method_names")));
+                        ps.setInt(5, ((List<?>) summary.get("imports")).size());
+                        ps.setInt(6, (int) summary.get("line_count"));
+                        ps.executeUpdate();
+                    }
+                    return null;
+                });
+            } catch (Exception e) {
+                log.warn("Summary generation failed for {}, continuing", artifactId, e);
+            }
+
+            // Step 5: Parse imports
+            try {
+                List<String> imports = importParser.parseImports(normalizedText, fileName);
+                if (!imports.isEmpty()) {
+                    dataSource.withConnection(conn -> {
+                        try (PreparedStatement ps = conn.prepareStatement(
+                                "INSERT INTO artifact_imports (artifact_id, import_statement, resolved_artifact_id) VALUES (?, ?, ?)")) {
+                            for (String imp : imports) {
+                                ps.setString(1, artifactId);
+                                ps.setString(2, imp);
+                                ps.setString(3, resolveImport(conn, imp, fileName));
+                                ps.executeUpdate();
+                            }
+                        }
+                        return null;
+                    });
+                }
+            } catch (Exception e) {
+                log.warn("Import parsing failed for {}, continuing", artifactId, e);
+            }
+
+            // Step 6: Mark indexed
             artifactService.updateStatus(artifactId, ArtifactStatus.INDEXED, null);
             log.info("Artifact indexed: {} ({}, {} chunks)", artifactId, fileName, chunks.size());
 
@@ -264,5 +324,69 @@ public class IngestionWorker {
                 log.error("Failed to update status to FAILED", ex);
             }
         }
+    }
+
+    public void buildHnswIndex() throws SQLException {
+        HnswIndex index = new HnswIndex(config.getEmbeddingDim(), 16, 200, 50);
+        dataSource.withConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT chunk_id, embedding FROM chunk_embeddings");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String chunkId = rs.getString("chunk_id");
+                    double[] embedding = extractEmbeddingArray(rs);
+                    if (embedding != null) {
+                        index.insert(chunkId, embedding);
+                    }
+                }
+            }
+            return null;
+        });
+        searchService.setHnswIndex(index);
+        log.info("HNSW index built with {} vectors", index.size());
+    }
+
+    private double[] extractEmbeddingArray(ResultSet rs) throws SQLException {
+        Object embObj = rs.getObject("embedding");
+        if (embObj == null) return null;
+        if (embObj instanceof double[] arr) return arr;
+        if (embObj instanceof Object[] objArr) {
+            double[] result = new double[objArr.length];
+            for (int i = 0; i < objArr.length; i++) {
+                result[i] = ((Number) objArr[i]).doubleValue();
+            }
+            return result;
+        }
+        if (embObj instanceof java.sql.Array sqlArray) {
+            Object[] arr = (Object[]) sqlArray.getArray();
+            double[] result = new double[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                result[i] = ((Number) arr[i]).doubleValue();
+            }
+            return result;
+        }
+        return null;
+    }
+
+    private String resolveImport(Connection conn, String importStr, String fileName) {
+        try {
+            // Only resolve Java imports for now
+            if (!fileName.endsWith(".java")) {
+                return null;
+            }
+            String pathSuffix = importStr.replace('.', '/') + ".java";
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT artifact_id FROM artifacts WHERE original_client_path LIKE '%' || ? AND status = 'INDEXED' LIMIT 1")) {
+                ps.setString(1, pathSuffix);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getString("artifact_id");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not resolve import '{}': {}", importStr, e.getMessage());
+        }
+        return null;
     }
 }
