@@ -26,7 +26,7 @@ public class ArtifactService {
     public Map<String, String> getStatus(String artifactId) throws SQLException {
         return dataSource.withConnection(conn -> {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT artifact_id, file_name, status, error_message, created_at, updated_at, indexed_at FROM artifacts WHERE artifact_id = ?")) {
+                    "SELECT artifact_id, file_name, status, error_message, created_at, updated_at, indexed_at, enrichment_status, freshness FROM artifacts WHERE artifact_id = ?")) {
                 ps.setString(1, artifactId);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
@@ -38,6 +38,8 @@ public class ArtifactService {
                         result.put("created_at", rs.getString("created_at") != null ? rs.getString("created_at") : "");
                         result.put("updated_at", rs.getString("updated_at") != null ? rs.getString("updated_at") : "");
                         result.put("indexed_at", rs.getString("indexed_at") != null ? rs.getString("indexed_at") : "");
+                        result.put("enrichment_status", rs.getString("enrichment_status") != null ? rs.getString("enrichment_status") : "");
+                        result.put("freshness", rs.getString("freshness") != null ? rs.getString("freshness") : "");
                         return result;
                     }
                 }

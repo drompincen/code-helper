@@ -1,7 +1,10 @@
 # JavaDucker v2
 
-Code search and retrieval server with REST API, DuckDB persistence, and background ingestion.
-Upload source files, index them into searchable chunks, and find content via exact, semantic, or hybrid search.
+[![CI](https://github.com/drompincen/code-helper/actions/workflows/ci.yml/badge.svg)](https://github.com/drompincen/code-helper/actions/workflows/ci.yml)
+![Coverage](.github/badges/jacoco.svg)
+![Branches](.github/badges/branches.svg)
+
+Code and content intelligence server for Claude Code. Indexes source files, documents, plans, notes, and threads into DuckDB with semantic search, dependency graphs, and content classification — all accessible via MCP tools and REST API.
 
 ## Tech Stack
 

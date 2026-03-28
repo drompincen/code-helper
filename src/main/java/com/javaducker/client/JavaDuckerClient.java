@@ -29,6 +29,15 @@ import java.util.stream.Stream;
                 JavaDuckerClient.CatCmd.class,
                 JavaDuckerClient.StatusCmd.class,
                 JavaDuckerClient.StatsCmd.class,
+                JavaDuckerClient.EnrichQueueCmd.class,
+                JavaDuckerClient.ClassifyCmd.class,
+                JavaDuckerClient.TagCmd.class,
+                JavaDuckerClient.LatestCmd.class,
+                JavaDuckerClient.FindByTypeCmd.class,
+                JavaDuckerClient.ConceptsCmd.class,
+                JavaDuckerClient.ConceptTimelineCmd.class,
+                JavaDuckerClient.StaleContentCmd.class,
+                JavaDuckerClient.ConceptHealthCmd.class,
         })
 public class JavaDuckerClient implements Runnable {
 
@@ -328,6 +337,232 @@ public class JavaDuckerClient implements Runnable {
                 if (byStatus != null && !byStatus.isEmpty()) {
                     System.out.println("By status:");
                     byStatus.forEach((k, v) -> System.out.println("  " + k + ": " + v));
+                }
+                Map<String, Object> byEnrichment = (Map<String, Object>) resp.get("enrichment_status");
+                if (byEnrichment != null && !byEnrichment.isEmpty()) {
+                    System.out.println("Enrichment:");
+                    byEnrichment.forEach((k, v) -> System.out.println("  " + k + ": " + v));
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    // ── Content Intelligence CLI commands ────────────────────
+
+    @Command(name = "enrich-queue", description = "List artifacts pending enrichment")
+    static class EnrichQueueCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+        @Option(names = {"--limit"}, defaultValue = "50") int limit;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/enrich-queue?limit=" + limit);
+                System.out.println("Pending enrichment: " + resp.get("count"));
+                List<Map<String, Object>> queue = (List<Map<String, Object>>) resp.get("queue");
+                if (queue != null) {
+                    for (Map<String, Object> item : queue) {
+                        System.out.println("  " + item.get("artifact_id") + " — " + item.get("file_name"));
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "classify", description = "Classify an artifact by document type")
+    static class ClassifyCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+        @Option(names = {"--id"}, required = true) String artifactId;
+        @Option(names = {"--doc-type"}, required = true) String docType;
+        @Option(names = {"--confidence"}, defaultValue = "1.0") double confidence;
+        @Option(names = {"--method"}, defaultValue = "manual") String method;
+
+        @Override
+        public void run() {
+            try {
+                Map<String, Object> resp = post(baseUrl(parent) + "/classify",
+                        Map.of("artifactId", artifactId, "docType", docType,
+                                "confidence", confidence, "method", method));
+                System.out.println("Classified: " + resp.get("artifact_id") + " as " + resp.get("doc_type"));
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "tag", description = "Add tags to an artifact")
+    static class TagCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+        @Option(names = {"--id"}, required = true) String artifactId;
+        @Option(names = {"--tags"}, required = true, description = "Comma-separated tags") String tags;
+
+        @Override
+        public void run() {
+            try {
+                List<Map<String, String>> tagList = new java.util.ArrayList<>();
+                for (String t : tags.split(",")) {
+                    tagList.add(Map.of("tag", t.trim(), "tag_type", "topic", "source", "manual"));
+                }
+                Map<String, Object> resp = post(baseUrl(parent) + "/tag",
+                        Map.of("artifactId", artifactId, "tags", tagList));
+                System.out.println("Tagged: " + resp.get("artifact_id") + " (" + resp.get("tags_count") + " tags)");
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "latest", description = "Get the latest current artifact on a topic")
+    static class LatestCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+        @Option(names = {"--topic"}, required = true) String topic;
+
+        @Override
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/latest?topic=" +
+                        java.net.URLEncoder.encode(topic, "UTF-8"));
+                if (Boolean.TRUE.equals(resp.get("found"))) {
+                    System.out.println("Artifact: " + resp.get("artifact_id"));
+                    System.out.println("File:     " + resp.get("file_name"));
+                    System.out.println("Type:     " + resp.get("doc_type"));
+                    System.out.println("Fresh:    " + resp.get("freshness"));
+                } else {
+                    System.out.println("No current artifact found for topic: " + topic);
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "find-by-type", description = "Find artifacts by document type")
+    static class FindByTypeCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+        @Option(names = {"--doc-type"}, required = true) String docType;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/find-by-type?docType=" +
+                        java.net.URLEncoder.encode(docType, "UTF-8"));
+                System.out.println("Found " + resp.get("count") + " artifact(s) of type " + docType);
+                List<Map<String, Object>> results = (List<Map<String, Object>>) resp.get("results");
+                if (results != null) {
+                    for (Map<String, Object> r : results) {
+                        System.out.println("  " + r.get("artifact_id") + " — " + r.get("file_name") + " [" + r.get("freshness") + "]");
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "concepts", description = "List all concepts across the corpus")
+    static class ConceptsCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/concepts");
+                System.out.println("Concepts: " + resp.get("count"));
+                List<Map<String, Object>> concepts = (List<Map<String, Object>>) resp.get("concepts");
+                if (concepts != null) {
+                    for (Map<String, Object> c : concepts) {
+                        System.out.println("  " + c.get("concept") + " (" + c.get("doc_count") + " docs, " + c.get("total_mentions") + " mentions)");
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "concept-timeline", description = "Show evolution of a concept over time")
+    static class ConceptTimelineCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+        @Option(names = {"--concept"}, required = true) String concept;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/concept-timeline/" +
+                        java.net.URLEncoder.encode(concept, "UTF-8"));
+                System.out.println("Concept: " + resp.get("concept") + " (" + resp.get("total_docs") + " docs)");
+                List<Map<String, Object>> timeline = (List<Map<String, Object>>) resp.get("timeline");
+                if (timeline != null) {
+                    for (Map<String, Object> entry : timeline) {
+                        System.out.println("  " + entry.get("created_at") + " — " +
+                                entry.get("file_name") + " [" + entry.get("doc_type") + "] " +
+                                entry.get("freshness"));
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "stale-content", description = "List stale and superseded artifacts")
+    static class StaleContentCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/stale-content");
+                System.out.println("Stale/superseded: " + resp.get("count"));
+                List<Map<String, Object>> stale = (List<Map<String, Object>>) resp.get("stale");
+                if (stale != null) {
+                    for (Map<String, Object> s : stale) {
+                        System.out.println("  " + s.get("artifact_id") + " — " + s.get("file_name") +
+                                " [" + s.get("freshness") + "]" +
+                                (s.get("superseded_by") != null ? " superseded by " + s.get("superseded_by") : ""));
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    @Command(name = "concept-health", description = "Health report for all concepts")
+    static class ConceptHealthCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/concept-health");
+                System.out.println("Concepts: " + resp.get("total"));
+                List<Map<String, Object>> concepts = (List<Map<String, Object>>) resp.get("concepts");
+                if (concepts != null) {
+                    for (Map<String, Object> c : concepts) {
+                        System.out.println("  " + c.get("concept") + " — " +
+                                c.get("active_docs") + " active, " + c.get("stale_docs") + " stale [" +
+                                c.get("trend") + "]");
+                    }
                 }
             } catch (Exception e) {
                 System.err.println("Error: " + e.getMessage());
