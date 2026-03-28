@@ -66,6 +66,49 @@ public class ArtifactService {
         });
     }
 
+    public Map<String, Object> getSummary(String artifactId) throws SQLException {
+        return dataSource.withConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT artifact_id, summary_text, class_names, method_names, import_count, line_count FROM artifact_summaries WHERE artifact_id = ?")) {
+                ps.setString(1, artifactId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("artifact_id", rs.getString("artifact_id"));
+                        result.put("summary_text", rs.getString("summary_text"));
+                        result.put("class_names", rs.getString("class_names"));
+                        result.put("method_names", rs.getString("method_names"));
+                        result.put("import_count", rs.getInt("import_count"));
+                        result.put("line_count", rs.getInt("line_count"));
+                        return result;
+                    }
+                }
+            }
+            return null;
+        });
+    }
+
+    public void deleteArtifactData(String artifactId) throws SQLException {
+        log.info("Deleting indexed data for artifact {}", artifactId);
+        dataSource.withConnection(conn -> {
+            // chunk_embeddings uses chunk_id, not artifact_id — delete via subquery
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM chunk_embeddings WHERE chunk_id IN (SELECT chunk_id FROM artifact_chunks WHERE artifact_id = ?)")) {
+                ps.setString(1, artifactId);
+                ps.executeUpdate();
+            }
+            String[] tables = {"artifact_chunks", "artifact_text", "artifact_summaries", "artifact_imports", "ingestion_events"};
+            for (String table : tables) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM " + table + " WHERE artifact_id = ?")) {
+                    ps.setString(1, artifactId);
+                    ps.executeUpdate();
+                }
+            }
+            return null;
+        });
+    }
+
     public void updateStatus(String artifactId, ArtifactStatus status, String errorMessage) throws SQLException {
         dataSource.withConnection(conn -> {
             String sql;

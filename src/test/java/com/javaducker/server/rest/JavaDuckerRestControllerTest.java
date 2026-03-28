@@ -1,10 +1,8 @@
 package com.javaducker.server.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.javaducker.server.service.ArtifactService;
-import com.javaducker.server.service.SearchService;
-import com.javaducker.server.service.StatsService;
-import com.javaducker.server.service.UploadService;
+import com.javaducker.server.ingestion.FileWatcher;
+import com.javaducker.server.service.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -30,6 +28,10 @@ class JavaDuckerRestControllerTest {
     @MockBean ArtifactService artifactService;
     @MockBean SearchService searchService;
     @MockBean StatsService statsService;
+    @MockBean ProjectMapService projectMapService;
+    @MockBean StalenessService stalenessService;
+    @MockBean DependencyService dependencyService;
+    @MockBean FileWatcher fileWatcher;
 
     @Test
     void healthReturnsOk() throws Exception {

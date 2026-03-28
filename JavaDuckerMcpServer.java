@@ -111,6 +111,58 @@ public class JavaDuckerMcpServer {
                     "to monitor bulk ingestion progress.",
                     "{}"),
                 (ex, a) -> call(JavaDuckerMcpServer::stats))
+            .tool(
+                tool("javaducker_summarize",
+                    "Get a structural summary of an indexed file: class names, method names, imports, " +
+                    "line count. One-call overview without reading the full text.",
+                    schema(props(
+                        "artifact_id", str("Artifact ID to summarize")),
+                        "artifact_id")),
+                (ex, a) -> call(() -> summarize((String) a.get("artifact_id"))))
+            .tool(
+                tool("javaducker_map",
+                    "Get a project map showing directory structure, file counts, largest files, and " +
+                    "recently indexed files. Use for codebase orientation.",
+                    "{}"),
+                (ex, a) -> call(JavaDuckerMcpServer::projectMap))
+            .tool(
+                tool("javaducker_stale",
+                    "Check which indexed files are stale (modified on disk since last indexing). " +
+                    "Accepts file_paths (list of absolute paths) or git_diff_ref (e.g. HEAD~3) to auto-detect changed files.",
+                    schema(props(
+                        "file_paths",   str("JSON array of absolute file paths to check (optional if git_diff_ref given)"),
+                        "git_diff_ref", str("Git ref for diff, e.g. HEAD~3 or main (optional if file_paths given)")))),
+                (ex, a) -> call(() -> checkStale(
+                    (String) a.getOrDefault("file_paths", ""),
+                    (String) a.getOrDefault("git_diff_ref", ""))))
+            .tool(
+                tool("javaducker_dependencies",
+                    "Get the import/dependency list for an indexed file. Shows what this file imports " +
+                    "and which indexed artifacts those imports resolve to.",
+                    schema(props(
+                        "artifact_id", str("Artifact ID to get dependencies for")),
+                        "artifact_id")),
+                (ex, a) -> call(() -> dependencies((String) a.get("artifact_id"))))
+            .tool(
+                tool("javaducker_dependents",
+                    "Find which indexed files import/depend on this file. Useful for impact analysis.",
+                    schema(props(
+                        "artifact_id", str("Artifact ID to find dependents of")),
+                        "artifact_id")),
+                (ex, a) -> call(() -> dependents((String) a.get("artifact_id"))))
+            .tool(
+                tool("javaducker_watch",
+                    "Start or stop auto-indexing a directory. When watching, file changes are " +
+                    "automatically detected and re-indexed. Use action=start with a directory, or action=stop.",
+                    schema(props(
+                        "action",     str("start or stop"),
+                        "directory",  str("Absolute path to watch (required for start)"),
+                        "extensions", str("Comma-separated extensions, e.g. .java,.xml,.md (optional)")),
+                        "action")),
+                (ex, a) -> call(() -> watch(
+                    (String) a.get("action"),
+                    (String) a.getOrDefault("directory", ""),
+                    (String) a.getOrDefault("extensions", ""))))
             .build();
     }
 
@@ -202,6 +254,84 @@ public class JavaDuckerMcpServer {
 
     static Map<String, Object> stats() throws Exception {
         return httpGet("/stats");
+    }
+
+    static Map<String, Object> summarize(String artifactId) throws Exception {
+        Map<String, Object> r = httpGet("/summary/" + artifactId);
+        if (r == null) throw new RuntimeException("Artifact not found or no summary available: " + artifactId);
+        return r;
+    }
+
+    static Map<String, Object> projectMap() throws Exception {
+        return httpGet("/map");
+    }
+
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> checkStale(String filePathsJson, String gitDiffRef) throws Exception {
+        List<String> paths = new ArrayList<>();
+
+        // If git_diff_ref is given, run git diff to get file paths
+        if (gitDiffRef != null && !gitDiffRef.isBlank()) {
+            ProcessBuilder pb = new ProcessBuilder("git", "diff", "--name-only", gitDiffRef);
+            pb.directory(Path.of(PROJECT_ROOT).toFile());
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            String output = new String(proc.getInputStream().readAllBytes()).trim();
+            proc.waitFor();
+            if (!output.isEmpty()) {
+                Path root = Path.of(PROJECT_ROOT).toAbsolutePath();
+                for (String line : output.split("\n")) {
+                    paths.add(root.resolve(line.trim()).toString());
+                }
+            }
+        }
+
+        // If file_paths is given, parse it
+        if (filePathsJson != null && !filePathsJson.isBlank()) {
+            try {
+                List<String> parsed = MAPPER.readValue(filePathsJson, List.class);
+                paths.addAll(parsed);
+            } catch (Exception e) {
+                // Try as comma-separated
+                for (String p : filePathsJson.split(",")) {
+                    if (!p.isBlank()) paths.add(p.trim());
+                }
+            }
+        }
+
+        if (paths.isEmpty()) {
+            throw new RuntimeException("Provide file_paths or git_diff_ref");
+        }
+
+        return httpPost("/stale", Map.of("file_paths", paths));
+    }
+
+    static Map<String, Object> watch(String action, String directory, String extensions) throws Exception {
+        if ("stop".equalsIgnoreCase(action)) {
+            return httpPost("/watch/stop", Map.of());
+        }
+        if ("start".equalsIgnoreCase(action)) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("directory", directory);
+            if (extensions != null && !extensions.isBlank()) body.put("extensions", extensions);
+            return httpPost("/watch/start", body);
+        }
+        if ("status".equalsIgnoreCase(action)) {
+            return httpGet("/watch/status");
+        }
+        throw new RuntimeException("Unknown action: " + action + ". Use start, stop, or status.");
+    }
+
+    static Map<String, Object> dependencies(String artifactId) throws Exception {
+        Map<String, Object> r = httpGet("/dependencies/" + artifactId);
+        if (r == null) throw new RuntimeException("Artifact not found: " + artifactId);
+        return r;
+    }
+
+    static Map<String, Object> dependents(String artifactId) throws Exception {
+        Map<String, Object> r = httpGet("/dependents/" + artifactId);
+        if (r == null) throw new RuntimeException("Artifact not found: " + artifactId);
+        return r;
     }
 
     // ── HTTP helpers ──────────────────────────────────────────────────────────

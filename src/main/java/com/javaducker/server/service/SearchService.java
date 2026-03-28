@@ -3,6 +3,7 @@ package com.javaducker.server.service;
 import com.javaducker.server.config.AppConfig;
 import com.javaducker.server.db.DuckDBDataSource;
 import com.javaducker.server.ingestion.EmbeddingService;
+import com.javaducker.server.ingestion.HnswIndex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ public class SearchService {
     private final DuckDBDataSource dataSource;
     private final EmbeddingService embeddingService;
     private final AppConfig config;
+    private volatile HnswIndex hnswIndex;
 
     public SearchService(DuckDBDataSource dataSource, EmbeddingService embeddingService, AppConfig config) {
         this.dataSource = dataSource;
@@ -27,12 +29,21 @@ public class SearchService {
         this.config = config;
     }
 
+    public void setHnswIndex(HnswIndex index) {
+        this.hnswIndex = index;
+    }
+
+    public HnswIndex getHnswIndex() {
+        return hnswIndex;
+    }
+
     public List<Map<String, Object>> exactSearch(String phrase, int maxResults) throws SQLException {
         Connection conn = dataSource.getConnection();
         List<Map<String, Object>> results = new ArrayList<>();
 
         try (PreparedStatement ps = conn.prepareStatement("""
-                SELECT ac.chunk_id, ac.artifact_id, ac.chunk_index, ac.chunk_text, a.file_name
+                SELECT ac.chunk_id, ac.artifact_id, ac.chunk_index, ac.chunk_text,
+                       ac.line_start, ac.line_end, a.file_name
                 FROM artifact_chunks ac
                 JOIN artifacts a ON ac.artifact_id = a.artifact_id
                 WHERE a.status = 'INDEXED'
@@ -49,6 +60,8 @@ public class SearchService {
                     hit.put("chunk_index", rs.getInt("chunk_index"));
                     hit.put("preview", truncatePreview(rs.getString("chunk_text"), phrase));
                     hit.put("file_name", rs.getString("file_name"));
+                    hit.put("line_start", rs.getObject("line_start"));
+                    hit.put("line_end", rs.getObject("line_end"));
                     hit.put("score", computeExactScore(rs.getString("chunk_text"), phrase));
                     hit.put("match_type", "EXACT");
                     results.add(hit);
@@ -64,12 +77,48 @@ public class SearchService {
         double[] queryEmbedding = embeddingService.embed(phrase);
         int limit = maxResults > 0 ? maxResults : config.getMaxSearchResults();
 
+        // HNSW fast path
+        if (hnswIndex != null && !hnswIndex.isEmpty()) {
+            List<HnswIndex.Result> annResults = hnswIndex.search(queryEmbedding, limit);
+            List<Map<String, Object>> results = new ArrayList<>();
+            Connection conn = dataSource.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    SELECT ac.chunk_id, ac.artifact_id, ac.chunk_index, ac.chunk_text,
+                           ac.line_start, ac.line_end, a.file_name
+                    FROM artifact_chunks ac
+                    JOIN artifacts a ON ac.artifact_id = a.artifact_id
+                    WHERE ac.chunk_id = ?
+                    """)) {
+                for (HnswIndex.Result annResult : annResults) {
+                    ps.setString(1, annResult.id());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            Map<String, Object> hit = new HashMap<>();
+                            hit.put("chunk_id", rs.getString("chunk_id"));
+                            hit.put("artifact_id", rs.getString("artifact_id"));
+                            hit.put("chunk_index", rs.getInt("chunk_index"));
+                            String text = rs.getString("chunk_text");
+                            hit.put("preview", text.length() > 200 ? text.substring(0, 200) + "..." : text);
+                            hit.put("file_name", rs.getString("file_name"));
+                            hit.put("line_start", rs.getObject("line_start"));
+                            hit.put("line_end", rs.getObject("line_end"));
+                            hit.put("score", 1.0 - annResult.distance());
+                            hit.put("match_type", "SEMANTIC");
+                            results.add(hit);
+                        }
+                    }
+                }
+            }
+            return results;
+        }
+
         Connection conn = dataSource.getConnection();
         List<Map<String, Object>> results = new ArrayList<>();
 
         // Load all chunk embeddings and compute similarity in Java (brute force for v2)
         try (PreparedStatement ps = conn.prepareStatement("""
-                SELECT ce.chunk_id, ce.embedding, ac.artifact_id, ac.chunk_index, ac.chunk_text, a.file_name
+                SELECT ce.chunk_id, ce.embedding, ac.artifact_id, ac.chunk_index, ac.chunk_text,
+                       ac.line_start, ac.line_end, a.file_name
                 FROM chunk_embeddings ce
                 JOIN artifact_chunks ac ON ce.chunk_id = ac.chunk_id
                 JOIN artifacts a ON ac.artifact_id = a.artifact_id
@@ -90,6 +139,8 @@ public class SearchService {
                                 ? rs.getString("chunk_text").substring(0, 200) + "..."
                                 : rs.getString("chunk_text"));
                         hit.put("file_name", rs.getString("file_name"));
+                        hit.put("line_start", rs.getObject("line_start"));
+                        hit.put("line_end", rs.getObject("line_end"));
                         hit.put("score", similarity);
                         hit.put("match_type", "SEMANTIC");
                         results.add(hit);

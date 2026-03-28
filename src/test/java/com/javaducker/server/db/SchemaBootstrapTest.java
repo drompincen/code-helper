@@ -3,6 +3,7 @@ package com.javaducker.server.db;
 import com.javaducker.server.config.AppConfig;
 import com.javaducker.server.ingestion.*;
 import com.javaducker.server.service.ArtifactService;
+import com.javaducker.server.service.SearchService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,9 +40,11 @@ class SchemaBootstrapTest {
 
     private SchemaBootstrap createBootstrap() {
         ArtifactService artifactService = new ArtifactService(dataSource);
+        SearchService searchService = new SearchService(dataSource, new EmbeddingService(config), config);
         IngestionWorker worker = new IngestionWorker(dataSource, artifactService,
                 new TextExtractor(), new TextNormalizer(), new Chunker(),
-                new EmbeddingService(config), config);
+                new EmbeddingService(config), new FileSummarizer(), new ImportParser(),
+                searchService, config);
         return new SchemaBootstrap(dataSource, config, worker);
     }
 

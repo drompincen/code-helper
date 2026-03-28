@@ -81,7 +81,9 @@ public class SchemaBootstrap {
                     chunk_index INTEGER NOT NULL,
                     chunk_text VARCHAR NOT NULL,
                     char_start BIGINT,
-                    char_end BIGINT
+                    char_end BIGINT,
+                    line_start INTEGER,
+                    line_end INTEGER
                 )
                 """);
 
@@ -112,6 +114,45 @@ public class SchemaBootstrap {
             stmt.execute("""
                 CREATE INDEX IF NOT EXISTS idx_artifacts_client_path
                     ON artifacts (original_client_path)
+                """);
+
+            // Feature 1: Add line_start/line_end columns to existing DBs
+            try (Statement alter = conn.createStatement()) {
+                alter.execute("ALTER TABLE artifact_chunks ADD COLUMN line_start INTEGER");
+            } catch (Exception ignored) {}
+            try (Statement alter = conn.createStatement()) {
+                alter.execute("ALTER TABLE artifact_chunks ADD COLUMN line_end INTEGER");
+            } catch (Exception ignored) {}
+
+            // Feature 3: File summaries table
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_summaries (
+                    artifact_id VARCHAR PRIMARY KEY,
+                    summary_text VARCHAR,
+                    class_names VARCHAR,
+                    method_names VARCHAR,
+                    import_count INTEGER,
+                    line_count INTEGER
+                )
+                """);
+
+            // Feature 5: Dependency/import graph table
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_imports (
+                    artifact_id VARCHAR NOT NULL,
+                    import_statement VARCHAR NOT NULL,
+                    resolved_artifact_id VARCHAR
+                )
+                """);
+
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_artifact_imports_artifact
+                    ON artifact_imports (artifact_id)
+                """);
+
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_artifact_imports_resolved
+                    ON artifact_imports (resolved_artifact_id)
                 """);
 
             log.info("Database schema created/verified");
