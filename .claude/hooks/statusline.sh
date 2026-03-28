@@ -37,7 +37,8 @@ PLANS_DIR="$DIR/drom-plans"
 if [ -d "$PLANS_DIR" ]; then
   for plan in "$PLANS_DIR"/*.md; do
     [ -f "$plan" ] || continue
-    if grep -q "^status: in-progress" "$plan" 2>/dev/null; then
+    # Match plans that are in-progress OR have any in-progress chapter (fallback for bad frontmatter)
+    if grep -q "^status: in-progress" "$plan" 2>/dev/null || grep -q '^\*\*Status:\*\* in-progress' "$plan" 2>/dev/null; then
       cur=$(grep "^current_chapter:" "$plan" 2>/dev/null | sed 's/^current_chapter: *//')
       total=$(grep -c "^## Chapter " "$plan" 2>/dev/null)
 done_count=$(grep -c '^\*\*Status:\*\* completed' "$plan" 2>/dev/null)

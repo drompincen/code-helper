@@ -42,7 +42,7 @@ current_chapter: 1
 # Plan: [Plan Title]
 
 ## Chapter 1: [Chapter Title]
-**Status:** in-progress | completed | pending
+**Status:** in-progress
 **Depends on:** none | Chapter N
 
 - [ ] Step description — [files affected]
@@ -87,13 +87,18 @@ current_chapter: 1
 
 ## Progress Tracking
 
+**IMPORTANT**: The statusline and session resumption depend on the frontmatter `status` field. You MUST keep it updated.
+
 As you execute a plan:
 
-1. **Before starting a chapter** — update its status to `in-progress` and set `current_chapter` in frontmatter
-2. **After completing a step** — mark it `[x]` in the plan file
-3. **After completing a chapter** — set its status to `completed`, add notes about what happened
-4. **When the entire plan is done** — set the frontmatter `status: completed`
-5. **If a plan is abandoned** — set `status: abandoned` and add a note explaining why
+1. **When creating a plan** — set frontmatter `status: in-progress` (NOT `pending`). The plan is being created to be worked on now
+2. **Before starting a chapter** — update its `**Status:**` to `in-progress` and set `current_chapter` in frontmatter
+3. **After completing a step** — mark it `[x]` in the plan file
+4. **After completing a chapter** — set its `**Status:**` to `completed`, add notes about what happened
+5. **When the entire plan is done** — set the frontmatter `status: completed`
+6. **If a plan is abandoned** — set `status: abandoned` and add a note explaining why
+
+The frontmatter `status` must be one of: `in-progress`, `completed`, `abandoned`. Never use `pending` for the plan-level status — plans are created to be executed.
 
 ## Session Resumption
 
