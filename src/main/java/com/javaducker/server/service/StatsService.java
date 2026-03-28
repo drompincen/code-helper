@@ -69,6 +69,17 @@ public class StatsService {
                 }
             }
             stats.put("artifacts_by_status", byStatus);
+
+            // Enrichment status breakdown
+            Map<String, Long> byEnrichment = new HashMap<>();
+            try (ResultSet rs = stmt.executeQuery(
+                    "SELECT enrichment_status, COUNT(*) as cnt FROM artifacts GROUP BY enrichment_status")) {
+                while (rs.next()) {
+                    String es = rs.getString("enrichment_status");
+                    byEnrichment.put(es != null ? es : "unknown", rs.getLong("cnt"));
+                }
+            }
+            stats.put("enrichment_status", byEnrichment);
         }
 
         return stats;

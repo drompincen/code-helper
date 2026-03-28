@@ -62,7 +62,12 @@ class FullFlowIntegrationTest {
         statsService = new StatsService(dataSource);
         ingestionWorker = new IngestionWorker(dataSource, artifactService,
                 textExtractor, textNormalizer, chunker, embeddingService,
-                new FileSummarizer(), new ImportParser(), searchService, config);
+                new FileSummarizer(), new ImportParser(),
+                new com.javaducker.server.ingestion.ReladomoXmlParser(),
+                new com.javaducker.server.service.ReladomoService(dataSource),
+                new com.javaducker.server.ingestion.ReladomoFinderParser(),
+                new com.javaducker.server.ingestion.ReladomoConfigParser(),
+                searchService, config);
 
         schemaBootstrap = new SchemaBootstrap(dataSource, config, ingestionWorker);
         schemaBootstrap.bootstrap();

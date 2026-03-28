@@ -45,6 +45,10 @@ class IngestionWorkerParallelTest {
         ingestionWorker = new IngestionWorker(dataSource, artifactService,
                 new TextExtractor(), new TextNormalizer(), new Chunker(),
                 new EmbeddingService(config), new FileSummarizer(), new ImportParser(),
+                new com.javaducker.server.ingestion.ReladomoXmlParser(),
+                new com.javaducker.server.service.ReladomoService(dataSource),
+                new com.javaducker.server.ingestion.ReladomoFinderParser(),
+                new com.javaducker.server.ingestion.ReladomoConfigParser(),
                 searchService, config);
 
         SchemaBootstrap bootstrap = new SchemaBootstrap(dataSource, config, ingestionWorker);

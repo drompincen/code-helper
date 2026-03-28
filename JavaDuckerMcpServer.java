@@ -12,6 +12,8 @@ import io.modelcontextprotocol.sdk.server.transport.StdioServerTransportProvider
 import java.io.ByteArrayOutputStream;
 import java.net.Socket;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -40,26 +42,15 @@ public class JavaDuckerMcpServer {
                     "Check if the JavaDucker server is running. Returns status and version.",
                     "{}"),
                 (ex, a) -> call(JavaDuckerMcpServer::health))
-            .tool(
-                tool("javaducker_index_file",
-                    "Upload and index a single file (.java,.xml,.md,.yml,.json,.txt,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.html,.htm,.epub,.rtf,.eml). " +
-                    "Returns artifact_id. Indexing is async — use javaducker_wait_for_indexed to confirm.",
-                    schema(props(
-                        "file_path", str("Absolute path to the file to index")),
-                        "file_path")),
+            .tool(tool("javaducker_index_file",
+                    "Upload and index a single file. Returns artifact_id. Async — use javaducker_wait_for_indexed to confirm.",
+                    schema(props("file_path", str("Absolute path to the file to index")), "file_path")),
                 (ex, a) -> call(() -> indexFile((String) a.get("file_path"))))
-            .tool(
-                tool("javaducker_index_directory",
-                    "Recursively index all source files in a directory. This is the primary way to " +
-                    "ingest an entire codebase. Async — use javaducker_stats to monitor progress. " +
-                    "extensions defaults to .java,.xml,.md,.yml,.json,.txt,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.html,.htm,.epub,.rtf,.eml",
-                    schema(props(
-                        "directory", str("Absolute path to the root directory to index"),
-                        "extensions", str("Comma-separated file extensions, e.g. .java,.xml,.md (optional)")),
-                        "directory")),
-                (ex, a) -> call(() -> indexDirectory(
-                    (String) a.get("directory"),
-                    (String) a.getOrDefault("extensions", ""))))
+            .tool(tool("javaducker_index_directory",
+                    "Recursively index all source files in a directory. Async — use javaducker_stats to monitor.",
+                    schema(props("directory", str("Absolute path to the root directory to index"),
+                        "extensions", str("Comma-separated extensions, e.g. .java,.xml,.md (optional)")), "directory")),
+                (ex, a) -> call(() -> indexDirectory((String) a.get("directory"), (String) a.getOrDefault("extensions", ""))))
             .tool(
                 tool("javaducker_search",
                     "Search the indexed codebase. Modes: " +
@@ -163,6 +154,145 @@ public class JavaDuckerMcpServer {
                     (String) a.get("action"),
                     (String) a.getOrDefault("directory", ""),
                     (String) a.getOrDefault("extensions", ""))))
+            // ── Content Intelligence: write tools ────────────────────────
+            .tool(tool("javaducker_classify",
+                    "Classify an artifact by doc type (ADR, DESIGN_DOC, PLAN, MEETING_NOTES, THREAD, SCRATCH, CODE, REFERENCE, TICKET).",
+                    schema(props("artifact_id", str("Artifact ID"), "doc_type", str("Document type"),
+                        "confidence", intParam("Confidence 0-1 (default 1)"), "method", str("Classification method (default llm)")),
+                        "artifact_id", "doc_type")),
+                (ex, a) -> call(() -> httpPost("/classify", Map.of(
+                    "artifactId", a.get("artifact_id"), "docType", a.get("doc_type"),
+                    "confidence", a.getOrDefault("confidence", 1.0), "method", a.getOrDefault("method", "llm")))))
+            .tool(tool("javaducker_tag",
+                    "Add tags to an artifact. Replaces existing tags.",
+                    schema(props("artifact_id", str("Artifact ID"), "tags", str("JSON array of {tag, tag_type, source} objects")),
+                        "artifact_id", "tags")),
+                (ex, a) -> call(() -> {
+                    List<Map<String, String>> tags = MAPPER.readValue((String) a.get("tags"), new TypeReference<>() {});
+                    return httpPost("/tag", Map.of("artifactId", a.get("artifact_id"), "tags", tags));
+                }))
+            .tool(tool("javaducker_extract_points",
+                    "Write salient points for an artifact: DECISION, IDEA, QUESTION, ACTION, RISK, INSIGHT, CONSTRAINT, STATUS.",
+                    schema(props("artifact_id", str("Artifact ID"), "points", str("JSON array of {point_type, point_text} objects")),
+                        "artifact_id", "points")),
+                (ex, a) -> call(() -> {
+                    List<Map<String, String>> points = MAPPER.readValue((String) a.get("points"), new TypeReference<>() {});
+                    return httpPost("/salient-points", Map.of("artifactId", a.get("artifact_id"), "points", points));
+                }))
+            .tool(tool("javaducker_set_freshness",
+                    "Mark an artifact as current, stale, or superseded.",
+                    schema(props("artifact_id", str("Artifact ID"), "freshness", str("current, stale, or superseded"),
+                        "superseded_by", str("Artifact ID that supersedes this one (optional)")),
+                        "artifact_id", "freshness")),
+                (ex, a) -> call(() -> httpPost("/freshness", Map.of(
+                    "artifactId", a.get("artifact_id"), "freshness", a.get("freshness"),
+                    "supersededBy", a.getOrDefault("superseded_by", "")))))
+            .tool(tool("javaducker_synthesize",
+                    "Write a synthesis record and prune full text/embeddings. Only works on stale/superseded artifacts.",
+                    schema(props("artifact_id", str("Artifact ID"), "summary_text", str("Compact summary"),
+                        "tags", str("Comma-separated tags"), "key_points", str("Key points"),
+                        "outcome", str("Outcome/resolution"), "original_file_path", str("Path to original file on disk")),
+                        "artifact_id", "summary_text")),
+                (ex, a) -> call(() -> httpPost("/synthesize", Map.of(
+                    "artifactId", a.get("artifact_id"), "summaryText", a.get("summary_text"),
+                    "tags", a.getOrDefault("tags", ""), "keyPoints", a.getOrDefault("key_points", ""),
+                    "outcome", a.getOrDefault("outcome", ""), "originalFilePath", a.getOrDefault("original_file_path", "")))))
+            .tool(tool("javaducker_link_concepts",
+                    "Create cross-document concept links.",
+                    schema(props("links", str("JSON array of {concept, artifact_a, artifact_b, strength} objects")),
+                        "links")),
+                (ex, a) -> call(() -> {
+                    List<Map<String, Object>> links = MAPPER.readValue((String) a.get("links"), new TypeReference<>() {});
+                    return httpPost("/link-concepts", Map.of("links", links));
+                }))
+            .tool(tool("javaducker_enrich_queue",
+                    "List artifacts queued for enrichment (INDEXED but not yet ENRICHED).",
+                    schema(props("limit", intParam("Max results (default 50)")))),
+                (ex, a) -> call(() -> httpGet("/enrich-queue?limit=" + ((Number) a.getOrDefault("limit", 50)).intValue())))
+            .tool(tool("javaducker_mark_enriched",
+                    "Mark an artifact as ENRICHED after post-processing is complete.",
+                    schema(props("artifact_id", str("Artifact ID")), "artifact_id")),
+                (ex, a) -> call(() -> httpPost("/mark-enriched", Map.of("artifactId", a.get("artifact_id")))))
+            // ── Content Intelligence: read tools ─────────────────────────
+            .tool(tool("javaducker_latest",
+                    "Get the most recent, non-superseded artifact on a topic — the 'current truth'.",
+                    schema(props("topic", str("Topic to search for")), "topic")),
+                (ex, a) -> call(() -> httpGet("/latest?topic=" + encode((String) a.get("topic")))))
+            .tool(tool("javaducker_find_by_type",
+                    "Find artifacts by document type (ADR, PLAN, DESIGN_DOC, etc.).",
+                    schema(props("doc_type", str("Document type to search for")), "doc_type")),
+                (ex, a) -> call(() -> httpGet("/find-by-type?docType=" + encode((String) a.get("doc_type")))))
+            .tool(tool("javaducker_find_by_tag",
+                    "Find artifacts matching a tag.",
+                    schema(props("tag", str("Tag to search for")), "tag")),
+                (ex, a) -> call(() -> httpGet("/find-by-tag?tag=" + encode((String) a.get("tag")))))
+            .tool(tool("javaducker_find_points",
+                    "Search salient points by type (DECISION, RISK, ACTION, etc.) across all documents.",
+                    schema(props("point_type", str("Point type: DECISION, IDEA, QUESTION, ACTION, RISK, INSIGHT, CONSTRAINT, STATUS"),
+                        "tag", str("Optional tag filter")), "point_type")),
+                (ex, a) -> call(() -> httpGet("/find-points?pointType=" + encode((String) a.get("point_type"))
+                    + (a.containsKey("tag") ? "&tag=" + encode((String) a.get("tag")) : ""))))
+            .tool(tool("javaducker_concepts",
+                    "List all concepts across the corpus with mention counts and doc counts.",
+                    "{}"),
+                (ex, a) -> call(() -> httpGet("/concepts")))
+            .tool(tool("javaducker_concept_timeline",
+                    "Show the evolution of a concept: all related docs ordered by time with freshness status.",
+                    schema(props("concept", str("Concept name")), "concept")),
+                (ex, a) -> call(() -> httpGet("/concept-timeline/" + encode((String) a.get("concept")))))
+            .tool(tool("javaducker_stale_content",
+                    "List artifacts flagged as stale or superseded, with what replaced them.",
+                    "{}"),
+                (ex, a) -> call(() -> httpGet("/stale-content")))
+            .tool(tool("javaducker_synthesis",
+                    "Retrieve synthesis records for pruned artifacts (summary + file path). Provide artifact_id for a specific record or keyword to search.",
+                    schema(props("artifact_id", str("Artifact ID (optional)"),
+                        "keyword", str("Search keyword (optional)")))),
+                (ex, a) -> call(() -> {
+                    if (a.containsKey("artifact_id")) return httpGet("/synthesis/" + a.get("artifact_id"));
+                    if (a.containsKey("keyword")) return httpGet("/synthesis/search?keyword=" + encode((String) a.get("keyword")));
+                    return Map.of("error", "Provide artifact_id or keyword");
+                }))
+            .tool(tool("javaducker_concept_health",
+                    "Health report for all concepts: active/stale doc counts, trend (active/fading/cold).",
+                    "{}"),
+                (ex, a) -> call(() -> httpGet("/concept-health")))
+            // ── Reladomo tools ───────────────────────────────────────────
+            .tool(tool("javaducker_reladomo_relationships",
+                    "Get a Reladomo object's attributes, relationships, and metadata in one call.",
+                    schema(props("object_name", str("Reladomo object name, e.g. Order")), "object_name")),
+                (ex, a) -> call(() -> httpGet("/reladomo/relationships/" + a.get("object_name"))))
+            .tool(tool("javaducker_reladomo_graph",
+                    "Traverse the Reladomo relationship graph from a root object up to N hops.",
+                    schema(props("object_name", str("Root object name"), "depth", intParam("Max depth (default 3)")), "object_name")),
+                (ex, a) -> call(() -> httpGet("/reladomo/graph/" + a.get("object_name") + "?depth=" + ((Number) a.getOrDefault("depth", 3)).intValue())))
+            .tool(tool("javaducker_reladomo_path",
+                    "Find the shortest relationship path between two Reladomo objects.",
+                    schema(props("from_object", str("Source object"), "to_object", str("Target object")), "from_object", "to_object")),
+                (ex, a) -> call(() -> httpGet("/reladomo/path?from=" + a.get("from_object") + "&to=" + a.get("to_object"))))
+            .tool(tool("javaducker_reladomo_schema",
+                    "Derive SQL DDL from a Reladomo object: column types, PK, temporal columns, indices.",
+                    schema(props("object_name", str("Reladomo object name")), "object_name")),
+                (ex, a) -> call(() -> httpGet("/reladomo/schema/" + a.get("object_name"))))
+            .tool(tool("javaducker_reladomo_object_files",
+                    "List all files for a Reladomo object grouped by type (generated, hand-written, xml, config).",
+                    schema(props("object_name", str("Reladomo object name")), "object_name")),
+                (ex, a) -> call(() -> httpGet("/reladomo/files/" + a.get("object_name"))))
+            .tool(tool("javaducker_reladomo_finders",
+                    "Show Finder query patterns for a Reladomo object, ranked by frequency with locations.",
+                    schema(props("object_name", str("Reladomo object name")), "object_name")),
+                (ex, a) -> call(() -> httpGet("/reladomo/finders/" + a.get("object_name"))))
+            .tool(tool("javaducker_reladomo_deepfetch",
+                    "Show deep fetch profiles — which relationships are eagerly loaded together.",
+                    schema(props("object_name", str("Reladomo object name")), "object_name")),
+                (ex, a) -> call(() -> httpGet("/reladomo/deepfetch/" + a.get("object_name"))))
+            .tool(tool("javaducker_reladomo_temporal",
+                    "Temporal classification of all Reladomo objects with column info and query patterns.", "{}"),
+                (ex, a) -> call(() -> httpGet("/reladomo/temporal")))
+            .tool(tool("javaducker_reladomo_config",
+                    "Runtime config for a Reladomo object: DB connection, cache strategy. Omit name for full topology.",
+                    schema(props("object_name", str("Object name (optional)")))),
+                (ex, a) -> call(() -> httpGet("/reladomo/config" + (a.containsKey("object_name") ? "?objectName=" + a.get("object_name") : ""))))
             .build();
     }
 
@@ -459,6 +589,10 @@ public class JavaDuckerMcpServer {
         Map<String, Object> m = new LinkedHashMap<>();
         for (int i = 0; i < pairs.length; i += 2) m.put((String) pairs[i], pairs[i + 1]);
         return m;
+    }
+
+    static String encode(String s) {
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 
     static String schema(Map<String, Object> properties, String... required) {

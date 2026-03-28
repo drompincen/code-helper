@@ -3,7 +3,9 @@ package com.javaducker.server.ingestion;
 import com.javaducker.server.config.AppConfig;
 import com.javaducker.server.db.DuckDBDataSource;
 import com.javaducker.server.model.ArtifactStatus;
+import com.javaducker.server.model.ReladomoParseResult;
 import com.javaducker.server.service.ArtifactService;
+import com.javaducker.server.service.ReladomoService;
 import com.javaducker.server.service.SearchService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -44,11 +46,17 @@ public class IngestionWorker {
 
     private final FileSummarizer fileSummarizer;
     private final ImportParser importParser;
+    private final ReladomoXmlParser reladomoXmlParser;
+    private final ReladomoService reladomoService;
+    private final ReladomoFinderParser reladomoFinderParser;
+    private final ReladomoConfigParser reladomoConfigParser;
 
     public IngestionWorker(DuckDBDataSource dataSource, ArtifactService artifactService,
                            TextExtractor textExtractor, TextNormalizer textNormalizer,
                            Chunker chunker, EmbeddingService embeddingService,
                            FileSummarizer fileSummarizer, ImportParser importParser,
+                           ReladomoXmlParser reladomoXmlParser, ReladomoService reladomoService,
+                           ReladomoFinderParser reladomoFinderParser, ReladomoConfigParser reladomoConfigParser,
                            SearchService searchService,
                            AppConfig config) {
         this.dataSource = dataSource;
@@ -59,6 +67,10 @@ public class IngestionWorker {
         this.embeddingService = embeddingService;
         this.fileSummarizer = fileSummarizer;
         this.importParser = importParser;
+        this.reladomoXmlParser = reladomoXmlParser;
+        this.reladomoService = reladomoService;
+        this.reladomoFinderParser = reladomoFinderParser;
+        this.reladomoConfigParser = reladomoConfigParser;
         this.searchService = searchService;
         this.config = config;
         this.threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(config.getIngestionWorkerThreads());
@@ -312,7 +324,39 @@ public class IngestionWorker {
                 log.warn("Import parsing failed for {}, continuing", artifactId, e);
             }
 
-            // Step 6: Mark indexed
+            // Step 6: Parse Reladomo XML definitions and config
+            try {
+                if (fileName.endsWith(".xml")) {
+                    if (reladomoXmlParser.isReladomoXml(normalizedText)) {
+                        ReladomoParseResult parsed = reladomoXmlParser.parse(normalizedText, fileName);
+                        reladomoService.storeReladomoObject(artifactId, parsed);
+                    } else if (reladomoConfigParser.isReladomoConfig(normalizedText)) {
+                        var config = reladomoConfigParser.parse(normalizedText, fileName);
+                        reladomoService.storeConfig(artifactId, fileName, config);
+                        reladomoService.tagArtifact(artifactId, "config");
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Reladomo XML parsing failed for {}, continuing", artifactId, e);
+            }
+
+            // Step 7: Classify Reladomo artifact type and parse finder patterns
+            try {
+                if (fileName.endsWith(".java")) {
+                    String reladomoType = reladomoService.classifyReladomoArtifact(fileName);
+                    if (!"none".equals(reladomoType)) {
+                        reladomoService.tagArtifact(artifactId, reladomoType);
+                    }
+                    var finderUsages = reladomoFinderParser.parseFinderUsages(normalizedText, fileName);
+                    if (!finderUsages.isEmpty()) reladomoService.storeFinderUsages(artifactId, fileName, finderUsages);
+                    var deepFetches = reladomoFinderParser.parseDeepFetchUsages(normalizedText, fileName);
+                    if (!deepFetches.isEmpty()) reladomoService.storeDeepFetchUsages(artifactId, fileName, deepFetches);
+                }
+            } catch (Exception e) {
+                log.warn("Reladomo classification/finder parsing failed for {}, continuing", artifactId, e);
+            }
+
+            // Step 8: Mark indexed and queue for enrichment
             artifactService.updateStatus(artifactId, ArtifactStatus.INDEXED, null);
             log.info("Artifact indexed: {} ({}, {} chunks)", artifactId, fileName, chunks.size());
 

@@ -47,6 +47,7 @@ public class SearchService {
                 FROM artifact_chunks ac
                 JOIN artifacts a ON ac.artifact_id = a.artifact_id
                 WHERE a.status = 'INDEXED'
+                AND COALESCE(a.freshness, 'current') != 'superseded'
                 AND LOWER(ac.chunk_text) LIKE LOWER('%' || ? || '%')
                 LIMIT ?
                 """)) {
@@ -123,6 +124,7 @@ public class SearchService {
                 JOIN artifact_chunks ac ON ce.chunk_id = ac.chunk_id
                 JOIN artifacts a ON ac.artifact_id = a.artifact_id
                 WHERE a.status = 'INDEXED'
+                AND COALESCE(a.freshness, 'current') != 'superseded'
                 """)) {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {

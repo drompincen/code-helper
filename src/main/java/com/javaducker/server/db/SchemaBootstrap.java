@@ -155,6 +155,229 @@ public class SchemaBootstrap {
                     ON artifact_imports (resolved_artifact_id)
                 """);
 
+            // Reladomo: reladomo_type column on artifacts
+            try (Statement alter = conn.createStatement()) {
+                alter.execute("ALTER TABLE artifacts ADD COLUMN reladomo_type VARCHAR DEFAULT 'none'");
+            } catch (Exception ignored) {}
+
+            // Reladomo: parsed object definitions
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_objects (
+                    object_name VARCHAR PRIMARY KEY,
+                    package_name VARCHAR,
+                    table_name VARCHAR,
+                    object_type VARCHAR,
+                    temporal_type VARCHAR,
+                    super_class VARCHAR,
+                    interfaces VARCHAR,
+                    source_attribute_name VARCHAR,
+                    source_attribute_type VARCHAR,
+                    artifact_id VARCHAR NOT NULL
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_attributes (
+                    object_name VARCHAR NOT NULL,
+                    attribute_name VARCHAR NOT NULL,
+                    java_type VARCHAR,
+                    column_name VARCHAR,
+                    nullable BOOLEAN DEFAULT FALSE,
+                    primary_key BOOLEAN DEFAULT FALSE,
+                    max_length INTEGER,
+                    trim BOOLEAN DEFAULT FALSE,
+                    truncate BOOLEAN DEFAULT FALSE,
+                    PRIMARY KEY (object_name, attribute_name)
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_relationships (
+                    object_name VARCHAR NOT NULL,
+                    relationship_name VARCHAR NOT NULL,
+                    cardinality VARCHAR,
+                    related_object VARCHAR NOT NULL,
+                    reverse_relationship_name VARCHAR,
+                    parameters VARCHAR,
+                    join_expression VARCHAR,
+                    PRIMARY KEY (object_name, relationship_name)
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_indices (
+                    object_name VARCHAR NOT NULL,
+                    index_name VARCHAR NOT NULL,
+                    columns VARCHAR,
+                    is_unique BOOLEAN DEFAULT FALSE,
+                    PRIMARY KEY (object_name, index_name)
+                )
+                """);
+
+            // Reladomo: finder usage patterns (F13)
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_finder_usage (
+                    object_name VARCHAR NOT NULL,
+                    attribute_or_path VARCHAR NOT NULL,
+                    operation VARCHAR,
+                    source_file VARCHAR NOT NULL,
+                    line_number INTEGER,
+                    artifact_id VARCHAR NOT NULL
+                )
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_finder_usage_object
+                    ON reladomo_finder_usage (object_name)
+                """);
+
+            // Reladomo: deep fetch profiles (F14)
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_deep_fetch (
+                    object_name VARCHAR NOT NULL,
+                    fetch_path VARCHAR NOT NULL,
+                    source_file VARCHAR NOT NULL,
+                    line_number INTEGER,
+                    artifact_id VARCHAR NOT NULL
+                )
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_deep_fetch_object
+                    ON reladomo_deep_fetch (object_name)
+                """);
+
+            // Reladomo: runtime connection managers (F16)
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_connection_managers (
+                    config_file VARCHAR NOT NULL,
+                    manager_name VARCHAR NOT NULL,
+                    manager_class VARCHAR,
+                    properties VARCHAR,
+                    artifact_id VARCHAR NOT NULL,
+                    PRIMARY KEY (config_file, manager_name)
+                )
+                """);
+
+            // Reladomo: object-to-connection config (F16)
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS reladomo_object_config (
+                    object_name VARCHAR NOT NULL,
+                    config_file VARCHAR NOT NULL,
+                    connection_manager VARCHAR,
+                    cache_type VARCHAR,
+                    load_cache_on_startup BOOLEAN DEFAULT FALSE,
+                    artifact_id VARCHAR NOT NULL,
+                    PRIMARY KEY (object_name, config_file)
+                )
+                """);
+
+            // Content Intelligence: classification tables (O1)
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_classifications (
+                    artifact_id VARCHAR PRIMARY KEY,
+                    doc_type VARCHAR,
+                    confidence FLOAT,
+                    method VARCHAR,
+                    classified_at TIMESTAMP
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_tags (
+                    artifact_id VARCHAR NOT NULL,
+                    tag VARCHAR NOT NULL,
+                    tag_type VARCHAR,
+                    source VARCHAR,
+                    PRIMARY KEY (artifact_id, tag)
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_salient_points (
+                    point_id VARCHAR PRIMARY KEY,
+                    artifact_id VARCHAR NOT NULL,
+                    chunk_id VARCHAR,
+                    point_type VARCHAR NOT NULL,
+                    point_text VARCHAR NOT NULL,
+                    source VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_concepts (
+                    concept_id VARCHAR PRIMARY KEY,
+                    artifact_id VARCHAR NOT NULL,
+                    concept VARCHAR NOT NULL,
+                    concept_type VARCHAR,
+                    mention_count INTEGER,
+                    chunk_ids VARCHAR
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS concept_links (
+                    concept VARCHAR NOT NULL,
+                    artifact_a VARCHAR NOT NULL,
+                    artifact_b VARCHAR NOT NULL,
+                    strength FLOAT,
+                    PRIMARY KEY (concept, artifact_a, artifact_b)
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_synthesis (
+                    artifact_id VARCHAR PRIMARY KEY,
+                    summary_text VARCHAR,
+                    tags VARCHAR,
+                    key_points VARCHAR,
+                    outcome VARCHAR,
+                    original_file_path VARCHAR,
+                    synthesized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+
+            // Content Intelligence: freshness columns on artifacts
+            try (Statement alter = conn.createStatement()) {
+                alter.execute("ALTER TABLE artifacts ADD COLUMN freshness VARCHAR DEFAULT 'current'");
+            } catch (Exception ignored) {}
+            try (Statement alter = conn.createStatement()) {
+                alter.execute("ALTER TABLE artifacts ADD COLUMN superseded_by VARCHAR");
+            } catch (Exception ignored) {}
+            try (Statement alter = conn.createStatement()) {
+                alter.execute("ALTER TABLE artifacts ADD COLUMN freshness_updated_at TIMESTAMP");
+            } catch (Exception ignored) {}
+
+            // Content Intelligence: enrichment status column on artifacts
+            try (Statement alter = conn.createStatement()) {
+                alter.execute("ALTER TABLE artifacts ADD COLUMN enrichment_status VARCHAR DEFAULT 'pending'");
+            } catch (Exception ignored) {}
+
+            // Content Intelligence: indices
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_classifications_doc_type
+                    ON artifact_classifications (doc_type)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tags_tag
+                    ON artifact_tags (tag)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_salient_points_type
+                    ON artifact_salient_points (point_type)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_concepts_concept
+                    ON artifact_concepts (concept)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_artifacts_freshness
+                    ON artifacts (freshness)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_artifacts_enrichment
+                    ON artifacts (enrichment_status)
+                """);
+
             log.info("Database schema created/verified");
         }
     }

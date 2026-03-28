@@ -1,4 +1,6 @@
-# Project Configuration
+# drom-flow — Project Configuration
+
+> **drom-flow** is active in this project. It provides workflows, parallel agent orchestration, closed-loop pipelines, persistent memory, chapter-based execution plans, and lifecycle hooks.
 
 ## Behavioral Rules
 
@@ -18,6 +20,7 @@
 - Use `docs/` for documentation
 - Use `scripts/` for utility scripts and orchestration scripts
 - Use `config/` for configuration files
+- Use `drom-plans/` for execution plans (chapter-based, with progress tracking)
 
 ## Parallelism — ALWAYS parallel by default
 
@@ -101,3 +104,28 @@ Use these agent profiles when the task calls for a specialized role:
 - `/refactorer` — Safe code restructuring
 - `/architect` — System design and architecture decisions
 - `/orchestrator` — Design and run closed-loop pipelines
+
+## Plan Protocol
+
+- All plans are created in `drom-plans/` as markdown files with YAML frontmatter
+- Plans are broken into **chapters** — each chapter is a logical phase of work with its own steps
+- Chapter status tracks progress: `pending` → `in-progress` → `completed`
+- At session start, the memory-sync hook checks for `status: in-progress` plans and surfaces them
+- When resuming a plan, read the plan file, find the current chapter, and continue from the first unchecked step
+- Update step checkboxes (`[ ]` → `[x]`) and chapter status as work progresses
+- When all chapters are done, set the plan's frontmatter `status: completed`
+- Use `/planner` to create new plans — it handles the format and file creation
+
+## Updating drom-flow
+
+To update drom-flow to a newer version without losing project customizations:
+
+```bash
+# Check what would change (dry run)
+bash /path/to/drom-flow/init.sh --check .
+
+# Apply the update
+bash /path/to/drom-flow/init.sh --update .
+```
+
+`--update` overwrites drom-flow managed files (hooks, skills, workflows, settings) but **never touches** project-specific files: `CLAUDE.md`, `context/MEMORY.md`, `context/DECISIONS.md`, `context/CONVENTIONS.md`, `scripts/orchestrate.sh`. Plans in `drom-plans/` and reports are also preserved.
