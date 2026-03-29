@@ -201,4 +201,328 @@ class ReladomoServiceTest {
         List<?> path = (List<?>) result.get("path");
         assertTrue(path.isEmpty());
     }
+
+    // ── Schema DDL ────────────────────────────────────────────────────────
+
+    @Test
+    @Order(10)
+    void getSchemaDdl() throws Exception {
+        Map<String, Object> result = queryService.getSchema("Order");
+        assertEquals("Order", result.get("object_name"));
+        assertEquals("ORDER_TBL", result.get("table_name"));
+        assertEquals("none", result.get("temporal_type"));
+
+        String ddl = (String) result.get("ddl");
+        assertNotNull(ddl);
+        assertTrue(ddl.contains("CREATE TABLE ORDER_TBL"), "DDL should reference the table name");
+        assertTrue(ddl.contains("ORDER_ID"), "DDL should include the PK column");
+        assertTrue(ddl.contains("NOT NULL"), "DDL should mark non-nullable columns");
+        assertTrue(ddl.contains("PRIMARY KEY"), "DDL should declare primary key");
+        assertTrue(ddl.contains("VARCHAR(200)"), "String column with maxLength should produce VARCHAR(200)");
+    }
+
+    @Test
+    @Order(11)
+    void getSchemaNotFound() throws Exception {
+        Map<String, Object> result = queryService.getSchema("NoSuchObject");
+        assertNotNull(result.get("error"));
+    }
+
+    @Test
+    @Order(12)
+    void getSchemaWithIndex() throws Exception {
+        // Order was stored with idx_status index
+        Map<String, Object> result = queryService.getSchema("Order");
+        String ddl = (String) result.get("ddl");
+        assertTrue(ddl.contains("INDEX idx_status"), "DDL should include the index definition");
+    }
+
+    @Test
+    @Order(13)
+    void getSchemaTemporalBitemporal() throws Exception {
+        // Store a bitemporal object
+        service.storeReladomoObject("art-bt-1", new ReladomoParseResult(
+            "BiTemporalObj", "com.test", "BITEMP_TBL", "transactional", "bitemporal",
+            null, List.of(), null, null,
+            List.of(new ReladomoAttribute("id", "int", "ID", false, true, null, false, false)),
+            List.of(), List.of()
+        ));
+        Map<String, Object> result = queryService.getSchema("BiTemporalObj");
+        String ddl = (String) result.get("ddl");
+        assertEquals("bitemporal", result.get("temporal_type"));
+        assertTrue(ddl.contains("IN_Z"), "Bitemporal DDL should include IN_Z");
+        assertTrue(ddl.contains("OUT_Z"), "Bitemporal DDL should include OUT_Z");
+        assertTrue(ddl.contains("FROM_Z"), "Bitemporal DDL should include FROM_Z");
+        assertTrue(ddl.contains("THRU_Z"), "Bitemporal DDL should include THRU_Z");
+    }
+
+    // ── Object files ──────────────────────────────────────────────────────
+
+    @Test
+    @Order(20)
+    @SuppressWarnings("unchecked")
+    void getObjectFiles() throws Exception {
+        // Seed artifacts that reference "Order" in the file_name with reladomo_type set
+        dataSource.withConnection(conn -> {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("INSERT INTO artifacts (artifact_id, file_name, reladomo_type, status) VALUES " +
+                    "('art-xml-order', 'Order.xml', 'object-xml', 'INDEXED')");
+                stmt.execute("INSERT INTO artifacts (artifact_id, file_name, reladomo_type, status) VALUES " +
+                    "('art-java-order', 'OrderList.java', 'generated-list', 'INDEXED')");
+                stmt.execute("INSERT INTO artifacts (artifact_id, file_name, reladomo_type, status) VALUES " +
+                    "('art-finder-order', 'OrderFinder.java', 'generated-finder', 'INDEXED')");
+            }
+            return null;
+        });
+
+        Map<String, Object> result = queryService.getObjectFiles("Order");
+        assertEquals("Order", result.get("object_name"));
+
+        Map<String, List<Map<String, String>>> files =
+            (Map<String, List<Map<String, String>>>) result.get("files");
+        assertFalse(files.isEmpty(), "Should have file groups");
+        assertTrue(files.containsKey("object-xml"), "Should contain object-xml group");
+        assertTrue(files.containsKey("generated-list"), "Should contain generated-list group");
+        assertTrue(files.containsKey("generated-finder"), "Should contain generated-finder group");
+    }
+
+    // ── Finder patterns ───────────────────────────────────────────────────
+
+    @Test
+    @Order(30)
+    @SuppressWarnings("unchecked")
+    void getFinderPatterns() throws Exception {
+        dataSource.withConnection(conn -> {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("INSERT INTO reladomo_finder_usage (object_name, attribute_or_path, operation, source_file, line_number, artifact_id) VALUES " +
+                    "('Order', 'orderId', 'eq', 'OrderService.java', 42, 'art-fu-1')");
+                stmt.execute("INSERT INTO reladomo_finder_usage (object_name, attribute_or_path, operation, source_file, line_number, artifact_id) VALUES " +
+                    "('Order', 'orderId', 'eq', 'OrderDao.java', 100, 'art-fu-2')");
+                stmt.execute("INSERT INTO reladomo_finder_usage (object_name, attribute_or_path, operation, source_file, line_number, artifact_id) VALUES " +
+                    "('Order', 'amount', 'greaterThan', 'ReportService.java', 55, 'art-fu-3')");
+            }
+            return null;
+        });
+
+        Map<String, Object> result = queryService.getFinderPatterns("Order");
+        assertEquals("Order", result.get("object_name"));
+
+        List<Map<String, Object>> patterns = (List<Map<String, Object>>) result.get("patterns");
+        assertFalse(patterns.isEmpty(), "Should have finder patterns");
+        // orderId.eq appears twice so should be first (highest frequency)
+        assertEquals("orderId", patterns.get(0).get("attribute_or_path"));
+        assertEquals("eq", patterns.get(0).get("operation"));
+        assertEquals(2, patterns.get(0).get("frequency"));
+        // amount.greaterThan appears once
+        boolean hasAmount = patterns.stream().anyMatch(p ->
+            "amount".equals(p.get("attribute_or_path")) && "greaterThan".equals(p.get("operation")));
+        assertTrue(hasAmount, "Should include amount greaterThan pattern");
+    }
+
+    // ── Deep fetch profiles ───────────────────────────────────────────────
+
+    @Test
+    @Order(40)
+    @SuppressWarnings("unchecked")
+    void getDeepFetchProfiles() throws Exception {
+        dataSource.withConnection(conn -> {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("INSERT INTO reladomo_deep_fetch (object_name, fetch_path, source_file, line_number, artifact_id) VALUES " +
+                    "('Order', 'Order.items', 'OrderService.java', 50, 'art-df-1')");
+                stmt.execute("INSERT INTO reladomo_deep_fetch (object_name, fetch_path, source_file, line_number, artifact_id) VALUES " +
+                    "('Order', 'Order.items', 'OrderBatch.java', 80, 'art-df-2')");
+                stmt.execute("INSERT INTO reladomo_deep_fetch (object_name, fetch_path, source_file, line_number, artifact_id) VALUES " +
+                    "('Order', 'Order.items.product', 'OrderBatch.java', 81, 'art-df-3')");
+            }
+            return null;
+        });
+
+        Map<String, Object> result = queryService.getDeepFetchProfiles("Order");
+        assertEquals("Order", result.get("object_name"));
+
+        List<Map<String, Object>> profiles = (List<Map<String, Object>>) result.get("profiles");
+        assertFalse(profiles.isEmpty(), "Should have deep fetch profiles");
+        // Order.items appears twice so should be first
+        assertEquals("Order.items", profiles.get(0).get("fetch_path"));
+        assertEquals(2, profiles.get(0).get("frequency"));
+        boolean hasNested = profiles.stream().anyMatch(p ->
+            "Order.items.product".equals(p.get("fetch_path")));
+        assertTrue(hasNested, "Should include nested deep fetch path");
+    }
+
+    // ── Temporal info ─────────────────────────────────────────────────────
+
+    @Test
+    @Order(50)
+    @SuppressWarnings("unchecked")
+    void getTemporalInfo() throws Exception {
+        // Seed additional temporal objects
+        service.storeReladomoObject("art-pd-1", new ReladomoParseResult(
+            "AuditLog", "com.test", "AUDIT_TBL", "transactional", "processing-date",
+            null, List.of(), null, null,
+            List.of(new ReladomoAttribute("logId", "int", "LOG_ID", false, true, null, false, false)),
+            List.of(), List.of()
+        ));
+        service.storeReladomoObject("art-bd-1", new ReladomoParseResult(
+            "Contract", "com.test", "CONTRACT_TBL", "transactional", "business-date",
+            null, List.of(), null, null,
+            List.of(new ReladomoAttribute("contractId", "int", "CONTRACT_ID", false, true, null, false, false)),
+            List.of(), List.of()
+        ));
+
+        Map<String, Object> result = queryService.getTemporalInfo();
+        assertNotNull(result.get("total_objects"));
+        assertTrue((int) result.get("total_objects") >= 3, "Should have at least 3 temporal classifications");
+        assertEquals("9999-12-01 23:59:00.000", result.get("infinity_date"));
+
+        List<Map<String, Object>> classifications = (List<Map<String, Object>>) result.get("classifications");
+        assertFalse(classifications.isEmpty());
+
+        // Verify each temporal type has correct description and columns
+        boolean hasBitemporal = classifications.stream().anyMatch(c ->
+            "bitemporal".equals(c.get("temporal_type")) &&
+            c.get("description").toString().contains("bitemporal"));
+        boolean hasProcessing = classifications.stream().anyMatch(c ->
+            "processing-date".equals(c.get("temporal_type")) &&
+            ((List<?>) c.get("columns")).contains("IN_Z"));
+        boolean hasBusiness = classifications.stream().anyMatch(c ->
+            "business-date".equals(c.get("temporal_type")) &&
+            ((List<?>) c.get("columns")).contains("FROM_Z"));
+
+        assertTrue(hasBitemporal, "Should classify bitemporal objects");
+        assertTrue(hasProcessing, "Should classify processing-date objects with IN_Z/OUT_Z columns");
+        assertTrue(hasBusiness, "Should classify business-date objects with FROM_Z/THRU_Z columns");
+    }
+
+    // ── Runtime config ────────────────────────────────────────────────────
+
+    @Test
+    @Order(60)
+    @SuppressWarnings("unchecked")
+    void getConfigForObject() throws Exception {
+        dataSource.withConnection(conn -> {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("INSERT INTO reladomo_connection_managers (config_file, manager_name, manager_class, properties, artifact_id) VALUES " +
+                    "('ReladomoConfig.xml', 'mainDb', 'com.gs.fw.common.mithra.connectionmanager.XAConnectionManager', " +
+                    "'ldapName=section:resource', 'art-cm-1')");
+                stmt.execute("INSERT INTO reladomo_object_config (object_name, config_file, connection_manager, cache_type, load_cache_on_startup, artifact_id) VALUES " +
+                    "('Order', 'ReladomoConfig.xml', 'mainDb', 'partial', false, 'art-oc-1')");
+            }
+            return null;
+        });
+
+        Map<String, Object> result = queryService.getConfig("Order");
+        assertEquals("Order", result.get("object_name"));
+        assertEquals("mainDb", result.get("connection_manager"));
+        assertEquals("com.gs.fw.common.mithra.connectionmanager.XAConnectionManager", result.get("manager_class"));
+        assertEquals("partial", result.get("cache_type"));
+        assertEquals(false, result.get("load_cache_on_startup"));
+        assertEquals("ReladomoConfig.xml", result.get("config_file"));
+    }
+
+    @Test
+    @Order(61)
+    void getConfigForObjectNotFound() throws Exception {
+        Map<String, Object> result = queryService.getConfig("NoSuchConfigObject");
+        assertEquals("NoSuchConfigObject", result.get("object_name"));
+        assertNotNull(result.get("message"), "Should return message when config not found");
+    }
+
+    @Test
+    @Order(62)
+    @SuppressWarnings("unchecked")
+    void getConfigAll() throws Exception {
+        // Query without object name returns all managers and configs
+        Map<String, Object> result = queryService.getConfig(null);
+        List<Map<String, Object>> managers = (List<Map<String, Object>>) result.get("connection_managers");
+        List<Map<String, Object>> objects = (List<Map<String, Object>>) result.get("object_configs");
+
+        assertNotNull(managers);
+        assertNotNull(objects);
+        assertFalse(managers.isEmpty(), "Should return connection managers");
+        assertFalse(objects.isEmpty(), "Should return object configs");
+        // Verify the manager we inserted is present
+        boolean hasMainDb = managers.stream().anyMatch(m -> "mainDb".equals(m.get("name")));
+        assertTrue(hasMainDb, "Should include mainDb connection manager");
+    }
+
+    @Test
+    @Order(63)
+    @SuppressWarnings("unchecked")
+    void getConfigBlankObjectName() throws Exception {
+        // Blank string should behave like null — return all configs
+        Map<String, Object> result = queryService.getConfig("  ");
+        assertNotNull(result.get("connection_managers"), "Blank name should return all config");
+        assertNotNull(result.get("object_configs"));
+    }
+
+    // ── Graph edge cases ──────────────────────────────────────────────────
+
+    @Test
+    @Order(70)
+    @SuppressWarnings("unchecked")
+    void getGraphEmptyRelationships() throws Exception {
+        // Isolated object with no relationships — graph should return just the root node
+        Map<String, Object> graph = queryService.getGraph("Isolated", 2);
+        assertEquals("Isolated", graph.get("root"));
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) graph.get("nodes");
+        assertEquals(1, nodes.size(), "Isolated object graph should have only the root node");
+        List<Map<String, Object>> edges = (List<Map<String, Object>>) graph.get("edges");
+        assertTrue(edges.isEmpty(), "Isolated object graph should have no edges");
+    }
+
+    @Test
+    @Order(71)
+    void getGraphObjectNotFound() throws Exception {
+        Map<String, Object> result = queryService.getGraph("CompletelyNonExistent", 1);
+        assertNotNull(result.get("error"), "Non-existent object should return error");
+    }
+
+    @Test
+    @Order(72)
+    void getPathSourceNotFound() throws Exception {
+        Map<String, Object> result = queryService.getPath("CompletelyNonExistent", "Order");
+        assertNotNull(result.get("error"), "Non-existent source should return error");
+    }
+
+    @Test
+    @Order(73)
+    void getPathTargetNotFound() throws Exception {
+        Map<String, Object> result = queryService.getPath("Order", "CompletelyNonExistent");
+        assertNotNull(result.get("error"), "Non-existent target should return error");
+    }
+
+    // ── Schema type mapping edge cases ────────────────────────────────────
+
+    @Test
+    @Order(80)
+    void getSchemaProcessingDateTemporal() throws Exception {
+        service.storeReladomoObject("art-pd-schema-1", new ReladomoParseResult(
+            "ProcDateObj", "com.test", "PROC_TBL", "transactional", "processing-date",
+            null, List.of(), null, null,
+            List.of(new ReladomoAttribute("id", "int", "ID", false, true, null, false, false)),
+            List.of(), List.of()
+        ));
+        Map<String, Object> result = queryService.getSchema("ProcDateObj");
+        String ddl = (String) result.get("ddl");
+        assertTrue(ddl.contains("IN_Z"), "Processing-date DDL should include IN_Z");
+        assertTrue(ddl.contains("OUT_Z"), "Processing-date DDL should include OUT_Z");
+        assertFalse(ddl.contains("FROM_Z"), "Processing-date DDL should NOT include FROM_Z");
+    }
+
+    @Test
+    @Order(81)
+    void getSchemaBusinessDateTemporal() throws Exception {
+        service.storeReladomoObject("art-bd-schema-1", new ReladomoParseResult(
+            "BizDateObj", "com.test", "BIZ_TBL", "transactional", "business-date",
+            null, List.of(), null, null,
+            List.of(new ReladomoAttribute("id", "int", "ID", false, true, null, false, false)),
+            List.of(), List.of()
+        ));
+        Map<String, Object> result = queryService.getSchema("BizDateObj");
+        String ddl = (String) result.get("ddl");
+        assertTrue(ddl.contains("FROM_Z"), "Business-date DDL should include FROM_Z");
+        assertTrue(ddl.contains("THRU_Z"), "Business-date DDL should include THRU_Z");
+        assertFalse(ddl.contains("IN_Z"), "Business-date DDL should NOT include IN_Z");
+    }
 }
