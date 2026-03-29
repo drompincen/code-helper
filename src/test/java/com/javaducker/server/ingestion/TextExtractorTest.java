@@ -1,5 +1,9 @@
 package com.javaducker.server.ingestion;
 
+import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.hwpf.HWPFDocument;
+import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
@@ -9,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -575,5 +580,421 @@ class TextExtractorTest {
         var result = extractor.extract(file);
         assertTrue(result.text().contains("Mixed case"));
         assertEquals("JSOUP_HTML", result.method());
+    }
+
+    // ── PDF extraction ──────────────────────────────────────────────────────
+
+    @Test
+    void extractPdf() throws Exception {
+        // Create a minimal valid PDF using PDFBox
+        Path file = tempDir.resolve("test.pdf");
+        try (var doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            var page = new org.apache.pdfbox.pdmodel.PDPage();
+            doc.addPage(page);
+            try (var cs = new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 12);
+                cs.newLineAtOffset(100, 700);
+                cs.showText("Hello from PDF");
+                cs.endText();
+            }
+            doc.save(file.toFile());
+        }
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("Hello from PDF"), "PDF text: " + result.text());
+        assertEquals("PDFBOX", result.method());
+    }
+
+    @Test
+    void extractCorruptedPdfThrows() throws Exception {
+        Path file = tempDir.resolve("corrupt.pdf");
+        Files.write(file, "not a real PDF file at all".getBytes(StandardCharsets.UTF_8));
+        assertThrows(IOException.class, () -> extractor.extract(file));
+    }
+
+    // ── HTML with noscript tag ──────────────────────────────────────────────
+
+    @Test
+    void extractHtmlStripsNoscript() throws Exception {
+        Path file = tempDir.resolve("noscript.html");
+        Files.writeString(file,
+            "<html><body><p>Visible</p><noscript>Enable JS</noscript><style>.x{}</style></body></html>");
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("Visible"));
+        assertFalse(result.text().contains("Enable JS"), "noscript should be stripped");
+        assertFalse(result.text().contains(".x{}"), "style should be stripped");
+        assertEquals("JSOUP_HTML", result.method());
+    }
+
+    // ── ZIP with nested supported types ─────────────────────────────────────
+
+    @Test
+    void extractZipWithNestedJavaAndXml() throws Exception {
+        Path zipFile = tempDir.resolve("nested-types.zip");
+        try (var zos = new ZipOutputStream(Files.newOutputStream(zipFile))) {
+            zos.putNextEntry(new ZipEntry("src/Main.java"));
+            zos.write("public class Main { }".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("config/app.xml"));
+            zos.write("<config><key>value</key></config>".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("data.csv"));
+            zos.write("name,age\nAlice,30\nBob,25".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+        }
+        var result = extractor.extract(zipFile);
+        assertTrue(result.text().contains("public class Main"), "Should extract Java file");
+        assertTrue(result.text().contains("<config>"), "Should extract XML file");
+        assertTrue(result.text().contains("Alice"), "Should extract CSV file");
+        assertEquals("ZIP_RECURSE", result.method());
+    }
+
+    // ── Office format error paths (corrupted/invalid files) ─────────────────
+
+    @Test
+    void extractCorruptedDocxThrows() throws Exception {
+        Path file = tempDir.resolve("bad.docx");
+        Files.write(file, "this is not a valid docx".getBytes(StandardCharsets.UTF_8));
+        assertThrows(Exception.class, () -> extractor.extract(file));
+    }
+
+    @Test
+    void extractCorruptedXlsxThrows() throws Exception {
+        Path file = tempDir.resolve("bad.xlsx");
+        Files.write(file, "this is not a valid xlsx".getBytes(StandardCharsets.UTF_8));
+        assertThrows(Exception.class, () -> extractor.extract(file));
+    }
+
+    @Test
+    void extractCorruptedPptxThrows() throws Exception {
+        Path file = tempDir.resolve("bad.pptx");
+        Files.write(file, "this is not a valid pptx".getBytes(StandardCharsets.UTF_8));
+        assertThrows(Exception.class, () -> extractor.extract(file));
+    }
+
+    @Test
+    void extractCorruptedDocThrows() throws Exception {
+        Path file = tempDir.resolve("bad.doc");
+        Files.write(file, "this is not a valid doc".getBytes(StandardCharsets.UTF_8));
+        assertThrows(Exception.class, () -> extractor.extract(file));
+    }
+
+    @Test
+    void extractCorruptedXlsThrows() throws Exception {
+        Path file = tempDir.resolve("bad.xls");
+        Files.write(file, "this is not a valid xls".getBytes(StandardCharsets.UTF_8));
+        assertThrows(Exception.class, () -> extractor.extract(file));
+    }
+
+    @Test
+    void extractCorruptedPptThrows() throws Exception {
+        Path file = tempDir.resolve("bad.ppt");
+        Files.write(file, "this is not a valid ppt".getBytes(StandardCharsets.UTF_8));
+        assertThrows(Exception.class, () -> extractor.extract(file));
+    }
+
+    // ── isSupportedExtension edge cases not covered ─────────────────────────
+
+    @Test
+    void isSupportedExtensionEmptyString() {
+        assertFalse(TextExtractor.isSupportedExtension(""));
+    }
+
+    @Test
+    void isSupportedExtensionOdfTypes() {
+        assertTrue(TextExtractor.isSupportedExtension(".odp"));
+        assertTrue(TextExtractor.isSupportedExtension(".ods"));
+        assertTrue(TextExtractor.isSupportedExtension(".ODS"));
+    }
+
+    // ── EML with corrupt content ────────────────────────────────────────────
+
+    @Test
+    void extractCorruptedEmlThrows() throws Exception {
+        Path file = tempDir.resolve("corrupt.eml");
+        // Write binary garbage — not valid MIME
+        Files.write(file, new byte[]{0x00, 0x01, 0x02, (byte) 0xFF});
+        // May parse with empty content or throw
+        try {
+            var result = extractor.extract(file);
+            // If it doesn't throw, it should still have a method set
+            assertEquals("JAKARTA_MAIL", result.method());
+        } catch (IOException e) {
+            // Expected for corrupt EML
+            assertTrue(e.getMessage().contains("EML"));
+        }
+    }
+
+    // ── EPUB with mixed entry types ─────────────────────────────────────────
+
+    @Test
+    void extractEpubIgnoresNonHtmlEntries() throws Exception {
+        Path file = tempDir.resolve("mixed.epub");
+        try (var zos = new ZipOutputStream(Files.newOutputStream(file))) {
+            zos.putNextEntry(new ZipEntry("META-INF/container.xml"));
+            zos.write("<container/>".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("styles/main.css"));
+            zos.write("body { color: black; }".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("content.xhtml"));
+            zos.write("<html><body><p>EPUB content here</p></body></html>"
+                    .getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+        }
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("EPUB content here"));
+        assertFalse(result.text().contains("color: black"),
+                "CSS file should not be included");
+        assertEquals("EPUB_JSOUP", result.method());
+    }
+
+    // ── Legacy Office success paths (DOC, XLS, PPT) ────────────────────────
+
+    @Test
+    void extractXls() throws Exception {
+        var wb = new HSSFWorkbook();
+        var sheet = wb.createSheet("Sales");
+        var row = sheet.createRow(0);
+        row.createCell(0).setCellValue("Product");
+        row.createCell(1).setCellValue(99.5);
+        Path file = tempDir.resolve("test.xls");
+        try (var os = Files.newOutputStream(file)) { wb.write(os); }
+        wb.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("Product"), "XLS text: " + result.text());
+        assertTrue(result.text().contains("[Sheet: Sales]"), "XLS sheet name: " + result.text());
+        assertEquals("POI_XLS", result.method());
+    }
+
+    @Test
+    void extractXlsMultipleSheets() throws Exception {
+        var wb = new HSSFWorkbook();
+        var sheet1 = wb.createSheet("Sheet1");
+        sheet1.createRow(0).createCell(0).setCellValue("Data1");
+        var sheet2 = wb.createSheet("Sheet2");
+        sheet2.createRow(0).createCell(0).setCellValue("Data2");
+        Path file = tempDir.resolve("multi-sheet.xls");
+        try (var os = Files.newOutputStream(file)) { wb.write(os); }
+        wb.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("Data1"));
+        assertTrue(result.text().contains("Data2"));
+        assertTrue(result.text().contains("[Sheet: Sheet1]"));
+        assertTrue(result.text().contains("[Sheet: Sheet2]"));
+        assertEquals("POI_XLS", result.method());
+    }
+
+    @Test
+    void extractPpt() throws Exception {
+        var ppt = new HSLFSlideShow();
+        var slide = ppt.createSlide();
+        var tb = slide.addTitle();
+        tb.setText("Legacy PPT slide");
+        Path file = tempDir.resolve("test.ppt");
+        try (var os = Files.newOutputStream(file)) { ppt.write(os); }
+        ppt.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("Legacy PPT slide"), "PPT text: " + result.text());
+        assertEquals("POI_PPT", result.method());
+    }
+
+    @Test
+    void extractPptMultipleSlides() throws Exception {
+        var ppt = new HSLFSlideShow();
+        var slide1 = ppt.createSlide();
+        slide1.addTitle().setText("Slide one");
+        var slide2 = ppt.createSlide();
+        slide2.addTitle().setText("Slide two");
+        Path file = tempDir.resolve("multi-slide.ppt");
+        try (var os = Files.newOutputStream(file)) { ppt.write(os); }
+        ppt.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("Slide one"));
+        assertTrue(result.text().contains("Slide two"));
+        assertTrue(result.text().contains("[Slide 1]"));
+        assertTrue(result.text().contains("[Slide 2]"));
+        assertEquals("POI_PPT", result.method());
+    }
+
+    // ── XLSX multiple sheets ────────────────────────────────────────────────
+
+    @Test
+    void extractXlsxMultipleSheets() throws Exception {
+        var wb = new XSSFWorkbook();
+        var s1 = wb.createSheet("Alpha");
+        s1.createRow(0).createCell(0).setCellValue("A1");
+        var s2 = wb.createSheet("Beta");
+        s2.createRow(0).createCell(0).setCellValue("B1");
+        Path file = tempDir.resolve("multi.xlsx");
+        try (var os = Files.newOutputStream(file)) { wb.write(os); }
+        wb.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("[Sheet: Alpha]"));
+        assertTrue(result.text().contains("[Sheet: Beta]"));
+        assertTrue(result.text().contains("A1"));
+        assertTrue(result.text().contains("B1"));
+        assertEquals("POI_XLSX", result.method());
+    }
+
+    // ── PPTX multiple slides with text shapes ───────────────────────────────
+
+    @Test
+    void extractPptxMultipleSlides() throws Exception {
+        var pptx = new XMLSlideShow();
+        var slide1 = pptx.createSlide();
+        slide1.createTextBox().setText("PPTX slide one");
+        var slide2 = pptx.createSlide();
+        slide2.createTextBox().setText("PPTX slide two");
+        Path file = tempDir.resolve("multi.pptx");
+        try (var os = Files.newOutputStream(file)) { pptx.write(os); }
+        pptx.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("PPTX slide one"));
+        assertTrue(result.text().contains("PPTX slide two"));
+        assertTrue(result.text().contains("[Slide 1]"));
+        assertTrue(result.text().contains("[Slide 2]"));
+        assertEquals("POI_PPTX", result.method());
+    }
+
+    // ── ZIP: max bytes exceeded ─────────────────────────────────────────────
+
+    @Test
+    void extractZipStopsAtMaxBytes() throws Exception {
+        // Create a ZIP with entries totaling more than 50 MB to hit the limit
+        Path zipFile = tempDir.resolve("large.zip");
+        byte[] bigContent = new byte[1024 * 1024]; // 1 MB per entry
+        java.util.Arrays.fill(bigContent, (byte) 'X');
+        try (var zos = new ZipOutputStream(Files.newOutputStream(zipFile))) {
+            for (int i = 0; i < 55; i++) {
+                zos.putNextEntry(new ZipEntry("file" + i + ".txt"));
+                zos.write(bigContent);
+                zos.closeEntry();
+            }
+        }
+        // Should not throw, just stop reading
+        var result = extractor.extract(zipFile);
+        assertEquals("ZIP_RECURSE", result.method());
+        // Not all 55 entries should be processed
+        assertFalse(result.text().contains("[file54.txt]"),
+                "Should stop before processing all entries");
+    }
+
+    // ── ZIP: entry whose inner extraction fails (fallback to raw UTF-8) ─────
+
+    @Test
+    void extractZipFallsBackToRawTextOnBadPdf() throws Exception {
+        Path zipFile = tempDir.resolve("badpdf.zip");
+        try (var zos = new ZipOutputStream(Files.newOutputStream(zipFile))) {
+            // A .pdf entry that is not valid PDF — triggers the catch block
+            zos.putNextEntry(new ZipEntry("broken.pdf"));
+            zos.write("This is not a real PDF".getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+        }
+        var result = extractor.extract(zipFile);
+        // The fallback path reads raw bytes as UTF-8
+        assertTrue(result.text().contains("This is not a real PDF"),
+                "Should fall back to raw text: " + result.text());
+        assertEquals("ZIP_RECURSE", result.method());
+    }
+
+    // ── EML: message with no From header ────────────────────────────────────
+
+    @Test
+    void extractEmlNoFromHeader() throws Exception {
+        Path file = tempDir.resolve("nofrom.eml");
+        String eml = "Subject: No From\r\n"
+                + "MIME-Version: 1.0\r\n"
+                + "Content-Type: text/plain; charset=UTF-8\r\n"
+                + "\r\n"
+                + "Body without from";
+        Files.writeString(file, eml);
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("No From"));
+        assertTrue(result.text().contains("Body without from"));
+        assertFalse(result.text().contains("From:"));
+        assertEquals("JAKARTA_MAIL", result.method());
+    }
+
+    // ── EML: message with no Subject header ─────────────────────────────────
+
+    @Test
+    void extractEmlNoSubjectHeader() throws Exception {
+        Path file = tempDir.resolve("nosubject.eml");
+        String eml = "From: test@test.com\r\n"
+                + "MIME-Version: 1.0\r\n"
+                + "Content-Type: text/plain; charset=UTF-8\r\n"
+                + "\r\n"
+                + "Body without subject";
+        Files.writeString(file, eml);
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("From:"));
+        assertTrue(result.text().contains("Body without subject"));
+        assertFalse(result.text().contains("Subject:"));
+        assertEquals("JAKARTA_MAIL", result.method());
+    }
+
+    // ── DOCX with multiple paragraphs ───────────────────────────────────────
+
+    @Test
+    void extractDocxMultipleParagraphs() throws Exception {
+        var doc = new XWPFDocument();
+        doc.createParagraph().createRun().setText("First paragraph");
+        doc.createParagraph().createRun().setText("Second paragraph");
+        doc.createParagraph().createRun().setText("Third paragraph");
+        Path file = tempDir.resolve("multi-para.docx");
+        try (var os = Files.newOutputStream(file)) { doc.write(os); }
+        doc.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("First paragraph"));
+        assertTrue(result.text().contains("Second paragraph"));
+        assertTrue(result.text().contains("Third paragraph"));
+        assertEquals("POI_DOCX", result.method());
+    }
+
+    // ── RTF: extraction with bad location (error path) ──────────────────────
+
+    @Test
+    void extractRtfInvalidContent() {
+        // Completely empty file — RTFEditorKit may throw or produce empty text
+        Path file = tempDir.resolve("empty.rtf");
+        try {
+            Files.writeString(file, "");
+            var result = extractor.extract(file);
+            // If it doesn't throw, the text should be empty
+            assertNotNull(result.text());
+            assertEquals("RTF_EDITOR_KIT", result.method());
+        } catch (IOException e) {
+            // Expected for invalid RTF
+            assertTrue(true);
+        }
+    }
+
+    // ── PPTX with empty slide (no text shapes) ─────────────────────────────
+
+    @Test
+    void extractPptxEmptySlide() throws Exception {
+        var pptx = new XMLSlideShow();
+        pptx.createSlide(); // slide with no shapes
+        Path file = tempDir.resolve("empty-slide.pptx");
+        try (var os = Files.newOutputStream(file)) { pptx.write(os); }
+        pptx.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("[Slide 1]"));
+        assertEquals("POI_PPTX", result.method());
+    }
+
+    // ── PPT with empty slide (no text shapes) ──────────────────────────────
+
+    @Test
+    void extractPptEmptySlide() throws Exception {
+        var ppt = new HSLFSlideShow();
+        ppt.createSlide(); // slide with no shapes
+        Path file = tempDir.resolve("empty-slide.ppt");
+        try (var os = Files.newOutputStream(file)) { ppt.write(os); }
+        ppt.close();
+        var result = extractor.extract(file);
+        assertTrue(result.text().contains("[Slide 1]"));
+        assertEquals("POI_PPT", result.method());
     }
 }

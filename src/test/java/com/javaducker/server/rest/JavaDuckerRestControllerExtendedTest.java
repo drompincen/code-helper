@@ -372,6 +372,118 @@ class JavaDuckerRestControllerExtendedTest {
                 .andExpect(jsonPath("$.dependents[0].source_id").value("dep-1"));
     }
 
+    // ── Session Decision endpoint tests ─────────────────────────────────
+
+    @Test
+    void extractDecisionsReturnsResult() throws Exception {
+        when(sessionIngestionService.storeDecisions(eq("session-1"), anyList()))
+                .thenReturn(Map.of("session_id", "session-1", "decisions_stored", 2));
+        String body = objectMapper.writeValueAsString(Map.of(
+                "sessionId", "session-1",
+                "decisions", List.of(
+                        Map.of("decision", "Use Kafka", "tag", "architecture"),
+                        Map.of("decision", "PostgreSQL for persistence", "tag", "db"))));
+        mockMvc.perform(post("/api/extract-session-decisions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decisions_stored").value(2));
+    }
+
+    @Test
+    void extractDecisionsRejectsMissingFields() throws Exception {
+        // Missing decisions field
+        String body = objectMapper.writeValueAsString(Map.of("sessionId", "session-1"));
+        mockMvc.perform(post("/api/extract-session-decisions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("sessionId and decisions are required"));
+    }
+
+    @Test
+    void extractDecisionsRejectsMissingSessionId() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of(
+                "decisions", List.of(Map.of("decision", "Use Kafka"))));
+        mockMvc.perform(post("/api/extract-session-decisions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void extractDecisionsRejectsEmptyDecisionsList() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of(
+                "sessionId", "session-1", "decisions", List.of()));
+        mockMvc.perform(post("/api/extract-session-decisions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void recentDecisionsReturnsData() throws Exception {
+        when(sessionIngestionService.getRecentDecisions(eq(5), isNull()))
+                .thenReturn(List.of(Map.of("session_id", "s1", "decision", "Use Kafka")));
+        mockMvc.perform(get("/api/session-decisions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.decisions[0].decision").value("Use Kafka"));
+    }
+
+    @Test
+    void recentDecisionsWithTagFilter() throws Exception {
+        when(sessionIngestionService.getRecentDecisions(eq(3), eq("architecture")))
+                .thenReturn(List.of(Map.of("session_id", "s1", "decision", "Use microservices")));
+        mockMvc.perform(get("/api/session-decisions?maxSessions=3&tag=architecture"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1));
+    }
+
+    // ── Related endpoint edge cases ──────────────────────────────────────
+
+    @Test
+    void relatedByArtifactWithBlankPathReturnsEmptyList() throws Exception {
+        when(artifactService.getStatus("abc-123")).thenReturn(Map.of(
+                "artifact_id", "abc-123", "original_client_path", "",
+                "status", "INDEXED"));
+        mockMvc.perform(get("/api/related/abc-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.artifact_id").value("abc-123"))
+                .andExpect(jsonPath("$.related").isEmpty());
+    }
+
+    @Test
+    void relatedByPathWithRebuild() throws Exception {
+        when(coChangeService.getRelatedFiles(eq("/src/Main.java"), eq(5)))
+                .thenReturn(List.of());
+        String body = objectMapper.writeValueAsString(Map.of(
+                "filePath", "/src/Main.java", "maxResults", 5, "rebuild", true));
+        mockMvc.perform(post("/api/related").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(0));
+    }
+
+    // ── Blame endpoint edge cases ────────────────────────────────────────
+
+    @Test
+    void blameByArtifactWithNoSummary() throws Exception {
+        when(gitBlameService.blameForArtifact("abc-123")).thenReturn(List.of(
+                new GitBlameService.BlameEntry(1, 1, "abcdef1234567890abcdef1234567890abcdef12",
+                        "alice", null, "commit msg", "code")));
+        when(artifactService.getSummary("abc-123")).thenReturn(null);
+        mockMvc.perform(get("/api/blame/abc-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.artifact_id").value("abc-123"))
+                .andExpect(jsonPath("$.summary").doesNotExist())
+                .andExpect(jsonPath("$.blame[0].date").doesNotExist());
+    }
+
+    // ── Index sessions with maxSessions ──────────────────────────────────
+
+    @Test
+    void indexSessionsWithMaxSessions() throws Exception {
+        when(sessionIngestionService.indexSessions(anyString(), eq(5)))
+                .thenReturn(Map.of("sessions_indexed", 5, "total_messages", 100, "project_path", "/tmp"));
+        String body = objectMapper.writeValueAsString(Map.of(
+                "projectPath", "/tmp/sessions", "maxSessions", 5));
+        mockMvc.perform(post("/api/index-sessions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sessions_indexed").value(5));
+    }
+
     // ── Reladomo endpoints ───────────────────────────────────────────────
 
     @Test

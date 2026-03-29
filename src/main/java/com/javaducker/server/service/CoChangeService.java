@@ -37,6 +37,13 @@ public class CoChangeService {
      */
     public void buildCoChangeIndex() throws Exception {
         String gitOutput = runGitLog();
+        buildCoChangeIndexFromOutput(gitOutput);
+    }
+
+    /**
+     * Build co-change index from pre-parsed git log output. Package-private for testing.
+     */
+    void buildCoChangeIndexFromOutput(String gitOutput) throws Exception {
         Map<String, List<String>> commits = parseGitLog(gitOutput);
         Map<String, List<String>> filtered = filterNoisyCommits(commits);
         Set<String> frequentFiles = findFrequentFiles(filtered);
@@ -146,8 +153,9 @@ public class CoChangeService {
 
     /**
      * Filter out commits with more than MAX_FILES_PER_COMMIT files.
+     * Package-private for testing.
      */
-    private Map<String, List<String>> filterNoisyCommits(Map<String, List<String>> commits) {
+    Map<String, List<String>> filterNoisyCommits(Map<String, List<String>> commits) {
         Map<String, List<String>> filtered = new LinkedHashMap<>();
         for (Map.Entry<String, List<String>> entry : commits.entrySet()) {
             if (entry.getValue().size() <= MAX_FILES_PER_COMMIT) {

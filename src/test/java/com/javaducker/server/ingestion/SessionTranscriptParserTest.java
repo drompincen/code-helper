@@ -168,4 +168,190 @@ class SessionTranscriptParserTest {
         List<SessionTranscript> results = parser.parseSessionFile(null);
         assertTrue(results.isEmpty());
     }
+
+    @Test
+    void parseSessionFileWithNonexistentPath() {
+        List<SessionTranscript> results = parser.parseSessionFile(Path.of("/does/not/exist.jsonl"));
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void findSessionFilesWithNonDirectoryPath(@TempDir Path tempDir) throws IOException {
+        Path file = tempDir.resolve("not-a-dir.txt");
+        Files.writeString(file, "text");
+        List<Path> files = parser.findSessionFiles(file);
+        assertTrue(files.isEmpty());
+    }
+
+    // ── Content array processing ─────────────────────────────────────
+
+    @Test
+    void parseToolResultContentBlock() {
+        // tool_result block with nested text content
+        String line = """
+                {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_result","content":[{"type":"text","text":"result output"}]}]}}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("result output", result.content());
+    }
+
+    @Test
+    void parseToolResultWithStringContent() {
+        // tool_result block with string content (not array)
+        String line = """
+                {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_result","content":"plain result text"}]}}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("plain result text", result.content());
+    }
+
+    @Test
+    void parseMixedContentBlocks() {
+        // Mix of text and tool_use blocks
+        String line = """
+                {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Before tool"},{"type":"tool_use","name":"Bash","id":"1","input":{}},{"type":"text","text":"After tool"}]}}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertTrue(result.content().contains("Before tool"));
+        assertTrue(result.content().contains("[tool_use: Bash]"));
+        assertTrue(result.content().contains("After tool"));
+        assertEquals("Bash", result.toolName());
+    }
+
+    @Test
+    void parseContentArrayWithOnlyImages() {
+        // Content array with only image blocks = no text = null
+        String line = """
+                {"type":"assistant","message":{"role":"assistant","content":[{"type":"image","source":{"data":"abc"}},{"type":"image","source":{"data":"def"}}]}}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+        assertNull(result, "Image-only content should produce null");
+    }
+
+    @Test
+    void parseToolResultWithEmptyNestedContent() {
+        // tool_result with nested content that produces empty text
+        String line = """
+                {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_result","content":[{"type":"image","source":{}}]}]}}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+        assertNull(result, "tool_result with only image nested content produces null");
+    }
+
+    // ── Role extraction edge cases ───────────────────────────────────
+
+    @Test
+    void parseRoleFromTypeFallback() {
+        // No message.role, only type field
+        String line = """
+                {"type":"tool_result","content":"some result text"}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("tool", result.role());
+    }
+
+    @Test
+    void parseRoleFromUnknownType() {
+        // Unknown type falls through to default
+        String line = """
+                {"type":"system_notice","content":"system text"}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("system_notice", result.role());
+    }
+
+    @Test
+    void parseRoleUnknownWhenNoTypeOrRole() {
+        // No type field and no message.role
+        String line = """
+                {"content":"orphan content"}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("unknown", result.role());
+    }
+
+    // ── Tool name extraction from type field ─────────────────────────
+
+    @Test
+    void toolNameExtractedFromToolUseType() {
+        String line = """
+                {"type":"tool_use","name":"Read","content":"reading file"}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("Read", result.toolName());
+    }
+
+    // ── Top-level content (no message wrapper) ───────────────────────
+
+    @Test
+    void parseTopLevelStringContent() {
+        String line = """
+                {"type":"human","content":"direct content without message wrapper","timestamp":"2026-03-28T10:00:00Z"}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("direct content without message wrapper", result.content());
+    }
+
+    @Test
+    void parseTopLevelArrayContent() {
+        String line = """
+                {"type":"assistant","content":[{"type":"text","text":"top-level array text"}]}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+
+        assertNotNull(result);
+        assertEquals("top-level array text", result.content());
+    }
+
+    // ── Null content field ───────────────────────────────────────────
+
+    @Test
+    void parseMessageWithNullContentField() {
+        // JSON with explicit null content
+        String line = """
+                {"type":"human","message":{"role":"user","content":null}}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+        assertNull(result, "Null content should result in null transcript");
+    }
+
+    @Test
+    void parseMessageWithNoContentField() {
+        String line = """
+                {"type":"human","message":{"role":"user"}}""";
+
+        SessionTranscript result = parser.parseLine(line, "session-1", "/projects/test", 0);
+        assertNull(result, "Missing content field should result in null transcript");
+    }
+
+    // ── File name without .jsonl extension ───────────────────────────
+
+    @Test
+    void parseSessionFileWithoutJsonlExtension(@TempDir Path tempDir) throws IOException {
+        String line = """
+                {"type":"human","message":{"role":"user","content":"test msg"}}""";
+        Path sessionFile = tempDir.resolve("session-no-ext");
+        Files.writeString(sessionFile, line + "\n");
+
+        List<SessionTranscript> results = parser.parseSessionFile(sessionFile);
+
+        assertEquals(1, results.size());
+        assertEquals("session-no-ext", results.get(0).sessionId());
+    }
 }

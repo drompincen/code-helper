@@ -4,6 +4,11 @@ import com.javaducker.server.config.AppConfig;
 import com.javaducker.server.db.DuckDBDataSource;
 import com.javaducker.server.db.SchemaBootstrap;
 import com.javaducker.server.ingestion.*;
+import com.javaducker.server.ingestion.ReladomoFinderParser.DeepFetchUsage;
+import com.javaducker.server.ingestion.ReladomoFinderParser.FinderUsage;
+import com.javaducker.server.model.ReladomoConfigResult;
+import com.javaducker.server.model.ReladomoConfigResult.ConnectionManagerDef;
+import com.javaducker.server.model.ReladomoConfigResult.ObjectConfigDef;
 import com.javaducker.server.model.ReladomoParseResult;
 import com.javaducker.server.model.ReladomoParseResult.ReladomoAttribute;
 import com.javaducker.server.model.ReladomoParseResult.ReladomoIndex;
@@ -12,6 +17,8 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.sql.ResultSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -524,5 +531,501 @@ class ReladomoServiceTest {
         assertTrue(ddl.contains("FROM_Z"), "Business-date DDL should include FROM_Z");
         assertTrue(ddl.contains("THRU_Z"), "Business-date DDL should include THRU_Z");
         assertFalse(ddl.contains("IN_Z"), "Business-date DDL should NOT include IN_Z");
+    }
+
+    // ── ReladomoService: storeReladomoObject edge cases ──────────────────
+
+    @Test
+    @Order(100)
+    void storeObjectWithNoAttributesNoRelationshipsNoIndices() throws Exception {
+        ReladomoParseResult empty = new ReladomoParseResult(
+            "EmptyObj", "com.test", "EMPTY_TBL", "read-only", "none",
+            null, null, null, null,
+            null, null, null
+        );
+        service.storeReladomoObject("art-empty-1", empty);
+
+        Map<String, Object> result = queryService.getRelationships("EmptyObj");
+        assertEquals("EmptyObj", result.get("object_name"));
+        assertEquals("EMPTY_TBL", result.get("table_name"));
+
+        @SuppressWarnings("unchecked")
+        List<?> attrs = (List<?>) result.get("attributes");
+        assertTrue(attrs == null || attrs.isEmpty(), "Should have no attributes");
+
+        @SuppressWarnings("unchecked")
+        List<?> rels = (List<?>) result.get("relationships");
+        assertTrue(rels == null || rels.isEmpty(), "Should have no relationships");
+    }
+
+    @Test
+    @Order(101)
+    void storeObjectWithEmptyLists() throws Exception {
+        ReladomoParseResult emptyLists = new ReladomoParseResult(
+            "EmptyListObj", "com.test", "ELIST_TBL", "transactional", "none",
+            null, List.of(), null, null,
+            List.of(), List.of(), List.of()
+        );
+        service.storeReladomoObject("art-elist-1", emptyLists);
+
+        Map<String, Object> result = queryService.getRelationships("EmptyListObj");
+        assertEquals("EmptyListObj", result.get("object_name"));
+    }
+
+    @Test
+    @Order(102)
+    void storeObjectWithAllOptionalFields() throws Exception {
+        ReladomoParseResult full = new ReladomoParseResult(
+            "FullObj", "com.test.full", "FULL_TBL", "transactional", "bitemporal",
+            "BaseEntity", List.of("Auditable", "Trackable"), "sourceDb", "String",
+            List.of(
+                new ReladomoAttribute("id", "int", "ID", false, true, null, false, false),
+                new ReladomoAttribute("name", "String", "NAME", true, false, 100, true, true)
+            ),
+            List.of(
+                new ReladomoRelationship("parent", "many-to-one", "ParentObj",
+                    "children", "sourceDb=this.sourceDb", "this.parentId = ParentObj.id")
+            ),
+            List.of(
+                new ReladomoIndex("idx_name", "name", false),
+                new ReladomoIndex("idx_id_unique", "id", true)
+            )
+        );
+        service.storeReladomoObject("art-full-1", full);
+
+        // Verify object metadata including optional fields
+        Map<String, Object> result = queryService.getRelationships("FullObj");
+        assertEquals("FullObj", result.get("object_name"));
+        assertEquals("com.test.full", result.get("package_name"));
+
+        // Verify relationship with parameters and reverseRelationshipName stored
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rels = (List<Map<String, Object>>) result.get("relationships");
+        assertEquals(1, rels.size());
+        assertEquals("parent", rels.get(0).get("name"));
+        assertEquals("children", rels.get(0).get("reverse_name"));
+
+        // Verify parameters stored via raw SQL (query service does not expose parameters)
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT parameters, reverse_relationship_name FROM reladomo_relationships WHERE object_name = ?")) {
+                ps.setString(1, "FullObj");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("sourceDb=this.sourceDb", rs.getString("parameters"));
+                    assertEquals("children", rs.getString("reverse_relationship_name"));
+                }
+            }
+            return null;
+        });
+
+        // Verify indices stored (query via raw SQL)
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT * FROM reladomo_indices WHERE object_name = ? ORDER BY index_name")) {
+                ps.setString(1, "FullObj");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("idx_id_unique", rs.getString("index_name"));
+                    assertTrue(rs.getBoolean("is_unique"));
+                    assertTrue(rs.next());
+                    assertEquals("idx_name", rs.getString("index_name"));
+                    assertFalse(rs.getBoolean("is_unique"));
+                    assertFalse(rs.next());
+                }
+            }
+            return null;
+        });
+
+        // Verify interfaces were joined with comma
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT interfaces, super_class, source_attribute_name, source_attribute_type FROM reladomo_objects WHERE object_name = ?")) {
+                ps.setString(1, "FullObj");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("Auditable,Trackable", rs.getString("interfaces"));
+                    assertEquals("BaseEntity", rs.getString("super_class"));
+                    assertEquals("sourceDb", rs.getString("source_attribute_name"));
+                    assertEquals("String", rs.getString("source_attribute_type"));
+                }
+            }
+            return null;
+        });
+    }
+
+    @Test
+    @Order(103)
+    void reStoreObjectIsIdempotent() throws Exception {
+        // Store an object
+        ReladomoParseResult v1 = new ReladomoParseResult(
+            "MutableObj", "com.test", "MUT_TBL", "transactional", "none",
+            null, List.of(), null, null,
+            List.of(new ReladomoAttribute("id", "int", "ID", false, true, null, false, false)),
+            List.of(new ReladomoRelationship("child", "one-to-many", "ChildObj", null, null, "this.id = ChildObj.parentId")),
+            List.of(new ReladomoIndex("idx_old", "id", false))
+        );
+        service.storeReladomoObject("art-mut-1", v1);
+
+        // Re-store with different attributes, relationships, and indices
+        ReladomoParseResult v2 = new ReladomoParseResult(
+            "MutableObj", "com.test.v2", "MUT_TBL_V2", "read-only", "bitemporal",
+            "NewBase", List.of("NewIface"), "src", "int",
+            List.of(
+                new ReladomoAttribute("id", "int", "ID", false, true, null, false, false),
+                new ReladomoAttribute("version", "int", "VER", false, false, null, false, false)
+            ),
+            List.of(),
+            List.of(new ReladomoIndex("idx_new", "version", true))
+        );
+        service.storeReladomoObject("art-mut-2", v2);
+
+        // Verify the new version replaced the old
+        Map<String, Object> result = queryService.getRelationships("MutableObj");
+        assertEquals("com.test.v2", result.get("package_name"));
+        assertEquals("MUT_TBL_V2", result.get("table_name"));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> attrs = (List<Map<String, Object>>) result.get("attributes");
+        assertEquals(2, attrs.size(), "Should have 2 attributes after re-store");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rels = (List<Map<String, Object>>) result.get("relationships");
+        assertTrue(rels == null || rels.isEmpty(), "Should have no relationships after re-store");
+
+        // Verify old index replaced by new index
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT * FROM reladomo_indices WHERE object_name = ?")) {
+                ps.setString(1, "MutableObj");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("idx_new", rs.getString("index_name"));
+                    assertTrue(rs.getBoolean("is_unique"));
+                    assertFalse(rs.next(), "Should only have one index after re-store");
+                }
+            }
+            return null;
+        });
+    }
+
+    @Test
+    @Order(104)
+    void storeObjectWithNullInterfaces() throws Exception {
+        ReladomoParseResult obj = new ReladomoParseResult(
+            "NullIfaceObj", "com.test", "NIFACE_TBL", "transactional", "none",
+            null, null, null, null,
+            List.of(new ReladomoAttribute("id", "int", "ID", false, true, null, false, false)),
+            List.of(), List.of()
+        );
+        service.storeReladomoObject("art-niface-1", obj);
+
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT interfaces FROM reladomo_objects WHERE object_name = ?")) {
+                ps.setString(1, "NullIfaceObj");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertNull(rs.getString("interfaces"));
+                }
+            }
+            return null;
+        });
+    }
+
+    @Test
+    @Order(105)
+    void storeObjectAttributeMaxLengthBranches() throws Exception {
+        // Attribute with maxLength=null (setNull path) and maxLength=50 (setInt path)
+        ReladomoParseResult obj = new ReladomoParseResult(
+            "MaxLenObj", "com.test", "MAXLEN_TBL", "transactional", "none",
+            null, List.of(), null, null,
+            List.of(
+                new ReladomoAttribute("noLen", "String", "NO_LEN", true, false, null, false, false),
+                new ReladomoAttribute("withLen", "String", "WITH_LEN", true, false, 50, true, true)
+            ),
+            List.of(), List.of()
+        );
+        service.storeReladomoObject("art-maxlen-1", obj);
+
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT attribute_name, max_length, trim, truncate FROM reladomo_attributes WHERE object_name = ? ORDER BY attribute_name")) {
+                ps.setString(1, "MaxLenObj");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("noLen", rs.getString("attribute_name"));
+                    assertEquals(0, rs.getInt("max_length"));
+                    assertTrue(rs.wasNull(), "max_length should be null for noLen");
+
+                    assertTrue(rs.next());
+                    assertEquals("withLen", rs.getString("attribute_name"));
+                    assertEquals(50, rs.getInt("max_length"));
+                    assertTrue(rs.getBoolean("trim"));
+                    assertTrue(rs.getBoolean("truncate"));
+                }
+            }
+            return null;
+        });
+    }
+
+    // ── ReladomoService: classifyReladomoArtifact ────────────────────────
+
+    @Test
+    @Order(110)
+    void classifyNullFileName() throws Exception {
+        assertEquals("none", service.classifyReladomoArtifact(null));
+    }
+
+    @Test
+    @Order(111)
+    void classifyXmlDefinition() throws Exception {
+        assertEquals("xml-definition", service.classifyReladomoArtifact("OrderMithraObject.xml"));
+        assertEquals("xml-definition", service.classifyReladomoArtifact("src/main/OrderMithraObject.xml"));
+        assertEquals("xml-definition", service.classifyReladomoArtifact("PaymentMithraInterface.xml"));
+    }
+
+    @Test
+    @Order(112)
+    void classifyConfig() throws Exception {
+        assertEquals("config", service.classifyReladomoArtifact("MithraRuntimeConfig.xml"));
+        assertEquals("config", service.classifyReladomoArtifact("path/to/MithraRuntimeDev.xml"));
+    }
+
+    @Test
+    @Order(113)
+    void classifyGeneratedJavaFiles() throws Exception {
+        // Order is a known object from earlier tests
+        assertEquals("generated", service.classifyReladomoArtifact("OrderAbstract.java"));
+        assertEquals("generated", service.classifyReladomoArtifact("OrderFinder.java"));
+        assertEquals("generated", service.classifyReladomoArtifact("OrderList.java"));
+        assertEquals("generated", service.classifyReladomoArtifact("OrderListAbstract.java"));
+        assertEquals("generated", service.classifyReladomoArtifact("OrderDatabaseObject.java"));
+        assertEquals("generated", service.classifyReladomoArtifact("OrderDatabaseObjectAbstract.java"));
+        assertEquals("generated", service.classifyReladomoArtifact("OrderData.java"));
+    }
+
+    @Test
+    @Order(114)
+    void classifyHandWrittenJava() throws Exception {
+        // "Order" itself is a known object
+        assertEquals("hand-written", service.classifyReladomoArtifact("Order.java"));
+    }
+
+    @Test
+    @Order(115)
+    void classifyUnknownJavaFile() throws Exception {
+        assertEquals("none", service.classifyReladomoArtifact("SomethingElse.java"));
+    }
+
+    @Test
+    @Order(116)
+    void classifyNonJavaNonXml() throws Exception {
+        assertEquals("none", service.classifyReladomoArtifact("readme.txt"));
+        assertEquals("none", service.classifyReladomoArtifact("build.gradle"));
+    }
+
+    @Test
+    @Order(117)
+    void classifyWithBackslashPath() throws Exception {
+        assertEquals("xml-definition", service.classifyReladomoArtifact("src\\main\\OrderMithraObject.xml"));
+        assertEquals("generated", service.classifyReladomoArtifact("com\\gs\\OrderFinder.java"));
+    }
+
+    @Test
+    @Order(118)
+    void classifyConfigNotMatchingPrefix() throws Exception {
+        // An XML that ends with .xml but does not start with MithraRuntime
+        assertEquals("none", service.classifyReladomoArtifact("SomeConfig.xml"));
+    }
+
+    // ── ReladomoService: storeFinderUsages ───────────────────────────────
+
+    @Test
+    @Order(120)
+    void storeFinderUsages() throws Exception {
+        List<FinderUsage> usages = List.of(
+            new FinderUsage("TestObj", "fieldA", "eq", 10),
+            new FinderUsage("TestObj", "fieldB", "greaterThan", 20)
+        );
+        service.storeFinderUsages("art-fu-test-1", "TestService.java", usages);
+
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT * FROM reladomo_finder_usage WHERE artifact_id = ? ORDER BY line_number")) {
+                ps.setString(1, "art-fu-test-1");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("TestObj", rs.getString("object_name"));
+                    assertEquals("fieldA", rs.getString("attribute_or_path"));
+                    assertEquals("eq", rs.getString("operation"));
+                    assertEquals("TestService.java", rs.getString("source_file"));
+                    assertEquals(10, rs.getInt("line_number"));
+
+                    assertTrue(rs.next());
+                    assertEquals("fieldB", rs.getString("attribute_or_path"));
+                    assertEquals("greaterThan", rs.getString("operation"));
+                    assertEquals(20, rs.getInt("line_number"));
+
+                    assertFalse(rs.next());
+                }
+            }
+            return null;
+        });
+    }
+
+    @Test
+    @Order(121)
+    void storeFinderUsagesEmptyList() throws Exception {
+        // Should not throw with empty list
+        service.storeFinderUsages("art-fu-empty", "Empty.java", List.of());
+    }
+
+    // ── ReladomoService: storeDeepFetchUsages ────────────────────────────
+
+    @Test
+    @Order(130)
+    void storeDeepFetchUsages() throws Exception {
+        List<DeepFetchUsage> usages = List.of(
+            new DeepFetchUsage("FetchObj", "FetchObj.items", 15),
+            new DeepFetchUsage("FetchObj", "FetchObj.items.product", 16)
+        );
+        service.storeDeepFetchUsages("art-df-test-1", "FetchService.java", usages);
+
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT * FROM reladomo_deep_fetch WHERE artifact_id = ? ORDER BY line_number")) {
+                ps.setString(1, "art-df-test-1");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("FetchObj", rs.getString("object_name"));
+                    assertEquals("FetchObj.items", rs.getString("fetch_path"));
+                    assertEquals("FetchService.java", rs.getString("source_file"));
+                    assertEquals(15, rs.getInt("line_number"));
+
+                    assertTrue(rs.next());
+                    assertEquals("FetchObj.items.product", rs.getString("fetch_path"));
+                    assertEquals(16, rs.getInt("line_number"));
+
+                    assertFalse(rs.next());
+                }
+            }
+            return null;
+        });
+    }
+
+    @Test
+    @Order(131)
+    void storeDeepFetchUsagesEmptyList() throws Exception {
+        service.storeDeepFetchUsages("art-df-empty", "Empty.java", List.of());
+    }
+
+    // ── ReladomoService: storeConfig ─────────────────────────────────────
+
+    @Test
+    @Order(140)
+    void storeConfig() throws Exception {
+        ReladomoConfigResult config = new ReladomoConfigResult(
+            List.of(
+                new ConnectionManagerDef("testMgr", "com.test.ConnMgr", Map.of("host", "localhost", "port", "5432")),
+                new ConnectionManagerDef("cacheMgr", "com.test.CacheMgr", null)
+            ),
+            List.of(
+                new ObjectConfigDef("ConfigTestObj", "testMgr", "full", true),
+                new ObjectConfigDef("ConfigTestObj2", "cacheMgr", "none", false)
+            )
+        );
+        service.storeConfig("art-cfg-1", "TestRuntime.xml", config);
+
+        // Verify connection managers
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT * FROM reladomo_connection_managers WHERE config_file = ? ORDER BY manager_name")) {
+                ps.setString(1, "TestRuntime.xml");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("cacheMgr", rs.getString("manager_name"));
+                    assertEquals("com.test.CacheMgr", rs.getString("manager_class"));
+                    assertNull(rs.getString("properties"), "Null properties should store as null");
+
+                    assertTrue(rs.next());
+                    assertEquals("testMgr", rs.getString("manager_name"));
+                    assertNotNull(rs.getString("properties"));
+                }
+            }
+            return null;
+        });
+
+        // Verify object configs
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT * FROM reladomo_object_config WHERE config_file = ? ORDER BY object_name")) {
+                ps.setString(1, "TestRuntime.xml");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("ConfigTestObj", rs.getString("object_name"));
+                    assertEquals("testMgr", rs.getString("connection_manager"));
+                    assertEquals("full", rs.getString("cache_type"));
+                    assertTrue(rs.getBoolean("load_cache_on_startup"));
+
+                    assertTrue(rs.next());
+                    assertEquals("ConfigTestObj2", rs.getString("object_name"));
+                    assertFalse(rs.getBoolean("load_cache_on_startup"));
+                }
+            }
+            return null;
+        });
+    }
+
+    @Test
+    @Order(141)
+    void storeConfigIdempotent() throws Exception {
+        // Re-store same config file with different data
+        ReladomoConfigResult config = new ReladomoConfigResult(
+            List.of(new ConnectionManagerDef("testMgr", "com.test.NewConnMgr", null)),
+            List.of(new ObjectConfigDef("ConfigTestObj", "testMgr", "partial", false))
+        );
+        service.storeConfig("art-cfg-2", "TestRuntime.xml", config);
+
+        // Should have replaced the old entries
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM reladomo_connection_managers WHERE config_file = ? AND manager_name = 'testMgr'")) {
+                ps.setString(1, "TestRuntime.xml");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals(1, rs.getInt(1), "Should have exactly one testMgr entry after re-store");
+                }
+            }
+            return null;
+        });
+    }
+
+    // ── ReladomoService: tagArtifact directly ────────────────────────────
+
+    @Test
+    @Order(150)
+    void tagArtifactDirectly() throws Exception {
+        // Insert a test artifact first
+        dataSource.withConnection(conn -> {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("INSERT INTO artifacts (artifact_id, file_name, status) VALUES ('art-tag-1', 'TagTest.xml', 'INDEXED')");
+            }
+            return null;
+        });
+
+        service.tagArtifact("art-tag-1", "config");
+
+        dataSource.withConnection(conn -> {
+            try (var ps = conn.prepareStatement(
+                    "SELECT reladomo_type FROM artifacts WHERE artifact_id = ?")) {
+                ps.setString(1, "art-tag-1");
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("config", rs.getString("reladomo_type"));
+                }
+            }
+            return null;
+        });
     }
 }

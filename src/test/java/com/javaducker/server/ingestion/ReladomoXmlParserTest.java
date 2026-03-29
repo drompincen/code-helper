@@ -135,6 +135,240 @@ class ReladomoXmlParserTest {
         assertEquals("business-date", r.temporalType());
     }
 
+    // ── Processing-date only temporal ────────────────────────────────────
+
+    @Test
+    void parsesProcessingDateOnly() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="AuditLog"
+                          packageName="com.gs.fw.sample" tableName="AUDIT_TBL">
+                <AsOfAttribute name="processingDate" fromColumnName="IN_Z" toColumnName="OUT_Z"
+                               toIsInclusive="false" isProcessingDate="true"
+                               infinityDate="[com.gs.fw.common.mithra.util.DefaultInfinityTimestamp.getDefaultInfinity()]"/>
+                <Attribute name="logId" javaType="long" columnName="LOG_ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "AuditLogMithraObject.xml");
+        assertEquals("processing-date", r.temporalType());
+    }
+
+    // ── Generic AsOfAttribute with isProcessingDate ───────────────────
+
+    @Test
+    void parsesGenericAsOfWithProcessingDateFlag() {
+        // AsOfAttribute with a generic name, differentiated by isProcessingDate attribute
+        String xml = """
+            <MithraObject objectType="transactional" objectName="VersionTracker"
+                          packageName="com.gs.fw.sample" tableName="VERSION_TBL">
+                <AsOfAttribute name="validFrom" fromColumnName="FROM_Z" toColumnName="THRU_Z"
+                               toIsInclusive="false" isProcessingDate="true"
+                               infinityDate="[com.gs.fw.common.mithra.util.DefaultInfinityTimestamp.getDefaultInfinity()]"/>
+                <Attribute name="versionId" javaType="long" columnName="VERSION_ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "VersionTracker.xml");
+        assertEquals("processing-date", r.temporalType());
+    }
+
+    @Test
+    void parsesGenericAsOfWithoutProcessingDateFlagAsBusinessDate() {
+        // Generic name without isProcessingDate => business date
+        String xml = """
+            <MithraObject objectType="transactional" objectName="Snapshot"
+                          packageName="com.gs.fw.sample" tableName="SNAP_TBL">
+                <AsOfAttribute name="effectiveDate" fromColumnName="FROM_Z" toColumnName="THRU_Z"
+                               toIsInclusive="false"
+                               infinityDate="[com.gs.fw.common.mithra.util.DefaultInfinityTimestamp.getDefaultInfinity()]"/>
+                <Attribute name="snapId" javaType="long" columnName="SNAP_ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "Snapshot.xml");
+        assertEquals("business-date", r.temporalType());
+    }
+
+    // ── Relationship with parameters ──────────────────────────────────
+
+    @Test
+    void parsesRelationshipWithParameters() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="Order"
+                          packageName="com.gs.fw.sample" tableName="ORDER_TBL">
+                <Attribute name="orderId" javaType="int" columnName="ORDER_ID" primaryKey="true"/>
+                <Relationship name="itemsByDate" relatedObject="OrderItem" cardinality="one-to-many"
+                              parameters="Timestamp asOfDate">
+                    this.orderId = OrderItem.orderId
+                </Relationship>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "Order.xml");
+        assertEquals(1, r.relationships().size());
+        assertEquals("Timestamp asOfDate", r.relationships().get(0).parameters());
+    }
+
+    // ── Relationship with empty join expression ───────────────────────
+
+    @Test
+    void parsesRelationshipWithEmptyJoinExpression() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="Order"
+                          packageName="com.gs.fw.sample" tableName="ORDER_TBL">
+                <Attribute name="orderId" javaType="int" columnName="ORDER_ID" primaryKey="true"/>
+                <Relationship name="emptyJoin" relatedObject="OrderItem" cardinality="one-to-many">
+                </Relationship>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "Order.xml");
+        assertEquals(1, r.relationships().size());
+        assertNull(r.relationships().get(0).joinExpression(), "Empty join should be null");
+    }
+
+    // ── Index with unique=true ────────────────────────────────────────
+
+    @Test
+    void parsesUniqueIndex() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="User"
+                          packageName="com.gs.fw.sample" tableName="USER_TBL">
+                <Attribute name="userId" javaType="int" columnName="USER_ID" primaryKey="true"/>
+                <Attribute name="email" javaType="String" columnName="EMAIL"/>
+                <Index name="idx_email" unique="true">email</Index>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "User.xml");
+        assertEquals(1, r.indices().size());
+        assertTrue(r.indices().get(0).unique());
+        assertEquals("email", r.indices().get(0).columns());
+    }
+
+    // ── Multiple indices ──────────────────────────────────────────────
+
+    @Test
+    void parsesMultipleIndices() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="Product"
+                          packageName="com.gs.fw.sample" tableName="PRODUCT_TBL">
+                <Attribute name="productId" javaType="int" columnName="PRODUCT_ID" primaryKey="true"/>
+                <Attribute name="sku" javaType="String" columnName="SKU"/>
+                <Attribute name="category" javaType="String" columnName="CATEGORY"/>
+                <Index name="idx_sku" unique="true">sku</Index>
+                <Index name="idx_category">category</Index>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "Product.xml");
+        assertEquals(2, r.indices().size());
+    }
+
+    // ── Object with superClass ────────────────────────────────────────
+
+    @Test
+    void parsesSuperClass() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="SpecialOrder"
+                          packageName="com.gs.fw.sample" tableName="SPECIAL_ORDER"
+                          superClass="com.gs.fw.sample.Order">
+                <Attribute name="orderId" javaType="int" columnName="ORDER_ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "SpecialOrder.xml");
+        assertEquals("com.gs.fw.sample.Order", r.superClass());
+    }
+
+    // ── Object with interfaces ────────────────────────────────────────
+
+    @Test
+    void parsesObjectWithInterfaces() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="Order"
+                          packageName="com.gs.fw.sample" tableName="ORDER_TBL">
+                <MithraInterfaceResource name="Auditable"/>
+                <MithraInterfaceResource name="Trackable"/>
+                <Attribute name="orderId" javaType="int" columnName="ORDER_ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "Order.xml");
+        assertEquals(2, r.interfaces().size());
+        assertTrue(r.interfaces().contains("Auditable"));
+        assertTrue(r.interfaces().contains("Trackable"));
+    }
+
+    // ── Attribute with truncate flag ──────────────────────────────────
+
+    @Test
+    void parsesAttributeWithTruncate() {
+        String xml = """
+            <MithraObject objectType="transactional" objectName="Note"
+                          packageName="com.gs.fw.sample" tableName="NOTE_TBL">
+                <Attribute name="noteId" javaType="int" columnName="NOTE_ID" primaryKey="true"/>
+                <Attribute name="text" javaType="String" columnName="TEXT"
+                           maxLength="500" truncate="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "Note.xml");
+        var textAttr = r.attributes().stream().filter(a -> a.name().equals("text")).findFirst().orElseThrow();
+        assertTrue(textAttr.truncate());
+        assertEquals(Integer.valueOf(500), textAttr.maxLength());
+    }
+
+    // ── Object name derived from filename with path separators ────────
+
+    @Test
+    void derivesObjectNameFromFilenameWithPath() {
+        String xml = """
+            <MithraObject objectType="transactional">
+                <Attribute name="id" javaType="int" columnName="ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "com/gs/fw/sample/TradeMithraObject.xml");
+        assertEquals("Trade", r.objectName());
+    }
+
+    @Test
+    void derivesObjectNameFromFilenameWithBackslash() {
+        String xml = """
+            <MithraObject objectType="transactional">
+                <Attribute name="id" javaType="int" columnName="ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "com\\gs\\fw\\sample\\InvoiceMithraObject.xml");
+        assertEquals("Invoice", r.objectName());
+    }
+
+    @Test
+    void derivesObjectNameFromNullFilename() {
+        String xml = """
+            <MithraObject objectType="transactional">
+                <Attribute name="id" javaType="int" columnName="ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, null);
+        assertEquals("Unknown", r.objectName());
+    }
+
+    @Test
+    void derivesObjectNameFromFilenameWithMithraInterfaceSuffix() {
+        String xml = """
+            <MithraObject objectType="transactional">
+                <Attribute name="id" javaType="int" columnName="ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "AuditableMithraInterface.xml");
+        assertEquals("Auditable", r.objectName());
+    }
+
+    // ── read-only objectType ──────────────────────────────────────────
+
+    @Test
+    void parsesReadOnlyObjectType() {
+        String xml = """
+            <MithraObject objectType="read-only" objectName="LookupValue"
+                          packageName="com.gs.fw.sample" tableName="LOOKUP_TBL">
+                <Attribute name="lookupId" javaType="int" columnName="LOOKUP_ID" primaryKey="true"/>
+            </MithraObject>
+            """;
+        ReladomoParseResult r = parser.parse(xml, "LookupValue.xml");
+        assertEquals("read-only", r.objectType());
+    }
+
     // ── Test data ──────────────────────────────────────────────────────────
 
     static final String SIMPLE_OBJECT = """
