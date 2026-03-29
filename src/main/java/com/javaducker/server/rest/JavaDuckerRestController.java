@@ -27,6 +27,7 @@ public class JavaDuckerRestController {
     private final GitBlameService gitBlameService;
     private final CoChangeService coChangeService;
     private final ExplainService explainService;
+    private final SessionIngestionService sessionIngestionService;
 
     public JavaDuckerRestController(UploadService uploadService, ArtifactService artifactService,
                                      SearchService searchService, StatsService statsService,
@@ -36,7 +37,8 @@ public class JavaDuckerRestController {
                                      ContentIntelligenceService contentIntelligenceService,
                                      GitBlameService gitBlameService,
                                      CoChangeService coChangeService,
-                                     ExplainService explainService) {
+                                     ExplainService explainService,
+                                     SessionIngestionService sessionIngestionService) {
         this.uploadService = uploadService;
         this.artifactService = artifactService;
         this.searchService = searchService;
@@ -50,6 +52,7 @@ public class JavaDuckerRestController {
         this.gitBlameService = gitBlameService;
         this.coChangeService = coChangeService;
         this.explainService = explainService;
+        this.sessionIngestionService = sessionIngestionService;
     }
 
     @GetMapping("/health")
@@ -471,6 +474,61 @@ public class JavaDuckerRestController {
     public ResponseEntity<Map<String, Object>> rebuildCoChange() throws Exception {
         coChangeService.buildCoChangeIndex();
         return ResponseEntity.ok(Map.of("status", "rebuilt"));
+    }
+
+    // ── Session Transcript endpoints ────────────────────────────────────
+
+    @PostMapping("/index-sessions")
+    public ResponseEntity<Map<String, Object>> indexSessions(@RequestBody Map<String, Object> body) throws Exception {
+        String projectPath = (String) body.get("projectPath");
+        int maxSessions = body.containsKey("maxSessions") ? ((Number) body.get("maxSessions")).intValue() : 0;
+        boolean incremental = Boolean.TRUE.equals(body.get("incremental"));
+        Map<String, Object> result = incremental
+            ? sessionIngestionService.indexSessionsIncremental(projectPath, maxSessions)
+            : sessionIngestionService.indexSessions(projectPath, maxSessions);
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/sessions")
+    public ResponseEntity<Map<String, Object>> listSessions() throws Exception {
+        var sessions = sessionIngestionService.getSessionList();
+        return ResponseEntity.ok(Map.of("sessions", sessions, "count", sessions.size()));
+    }
+
+    @GetMapping("/session/{sessionId}")
+    public ResponseEntity<?> getSession(@PathVariable String sessionId) throws Exception {
+        var messages = sessionIngestionService.getSession(sessionId);
+        if (messages.isEmpty()) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(Map.of("session_id", sessionId, "messages", messages, "count", messages.size()));
+    }
+
+    @PostMapping("/search-sessions")
+    public ResponseEntity<Map<String, Object>> searchSessions(@RequestBody Map<String, Object> body) throws Exception {
+        String phrase = (String) body.get("phrase");
+        int maxResults = body.containsKey("max_results") ? ((Number) body.get("max_results")).intValue() : 20;
+        var results = sessionIngestionService.searchSessions(phrase, maxResults);
+        return ResponseEntity.ok(Map.of("total_results", results.size(), "results", results));
+    }
+
+    // ── Session Decision endpoints ─────────────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    @PostMapping("/extract-session-decisions")
+    public ResponseEntity<Map<String, Object>> extractDecisions(@RequestBody Map<String, Object> body) throws Exception {
+        String sessionId = (String) body.get("sessionId");
+        List<Map<String, String>> decisions = (List<Map<String, String>>) body.get("decisions");
+        if (sessionId == null || decisions == null || decisions.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "sessionId and decisions are required"));
+        }
+        return ResponseEntity.ok(sessionIngestionService.storeDecisions(sessionId, decisions));
+    }
+
+    @GetMapping("/session-decisions")
+    public ResponseEntity<Map<String, Object>> recentDecisions(
+            @RequestParam(defaultValue = "5") int maxSessions,
+            @RequestParam(required = false) String tag) throws Exception {
+        var decisions = sessionIngestionService.getRecentDecisions(maxSessions, tag);
+        return ResponseEntity.ok(Map.of("decisions", decisions, "count", decisions.size()));
     }
 
     // ── Reladomo endpoints ───────────────────────────────────────────────

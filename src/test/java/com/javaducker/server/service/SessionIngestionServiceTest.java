@@ -12,8 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -224,5 +223,62 @@ class SessionIngestionServiceTest {
                 .filter(m -> (int) m.get("message_index") >= 0)
                 .count();
         assertEquals(2, realMessages);
+    }
+
+    @Test
+    @Order(9)
+    void storeAndRetrieveDecisions() throws Exception {
+        List<Map<String, String>> decisions = List.of(
+                Map.of("text", "Use JWT for auth", "context", "Security discussion", "tags", "auth,security"),
+                Map.of("text", "DuckDB for analytics", "context", "DB choice", "tags", "database")
+        );
+
+        Map<String, Object> result = service.storeDecisions("sess-dec-001", decisions);
+        assertEquals("sess-dec-001", result.get("session_id"));
+        assertEquals(2, result.get("decisions_stored"));
+
+        // Retrieve all decisions (no filter)
+        List<Map<String, Object>> all = service.getRecentDecisions(5, null);
+        assertTrue(all.size() >= 2, "Should have at least 2 decisions");
+        assertTrue(all.stream().anyMatch(d -> "Use JWT for auth".equals(d.get("decision_text"))));
+        assertTrue(all.stream().anyMatch(d -> "DuckDB for analytics".equals(d.get("decision_text"))));
+    }
+
+    @Test
+    @Order(10)
+    void getRecentDecisionsWithTagFilter() throws Exception {
+        // Ensure decisions from previous test exist, then filter by tag
+        List<Map<String, Object>> authDecisions = service.getRecentDecisions(5, "auth");
+        assertFalse(authDecisions.isEmpty(), "Should find decisions tagged with 'auth'");
+        assertTrue(authDecisions.stream().allMatch(d -> {
+            String tags = (String) d.get("tags");
+            return tags != null && tags.toLowerCase().contains("auth");
+        }));
+
+        // Filter by a tag that doesn't exist
+        List<Map<String, Object>> noMatch = service.getRecentDecisions(5, "nonexistent-tag-xyz");
+        assertTrue(noMatch.isEmpty(), "Should find no decisions for nonexistent tag");
+    }
+
+    @Test
+    @Order(11)
+    void getRecentDecisionsNoFilter() throws Exception {
+        // Add decisions for a second session
+        List<Map<String, String>> moreDecisions = List.of(
+                Map.of("text", "Use React for frontend", "tags", "frontend")
+        );
+        service.storeDecisions("sess-dec-002", moreDecisions);
+
+        // Retrieve all without filter
+        List<Map<String, Object>> all = service.getRecentDecisions(10, null);
+        assertTrue(all.size() >= 3, "Should have at least 3 decisions across sessions");
+
+        // Verify decisions from both sessions are present
+        Set<String> sessionIds = new HashSet<>();
+        for (Map<String, Object> d : all) {
+            sessionIds.add((String) d.get("session_id"));
+        }
+        assertTrue(sessionIds.contains("sess-dec-001"));
+        assertTrue(sessionIds.contains("sess-dec-002"));
     }
 }
