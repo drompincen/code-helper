@@ -373,6 +373,98 @@ public class SessionIngestionService {
         return summary;
     }
 
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> storeDecisions(String sessionId, List<Map<String, String>> decisions) throws SQLException {
+        return dataSource.withConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    INSERT INTO session_decisions (session_id, decision_text, context, decided_at, tags)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
+                    """)) {
+                for (Map<String, String> d : decisions) {
+                    ps.setString(1, sessionId);
+                    ps.setString(2, d.get("text"));
+                    ps.setString(3, d.getOrDefault("context", ""));
+                    ps.setString(4, d.getOrDefault("tags", ""));
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+            return Map.of("session_id", sessionId, "decisions_stored", decisions.size());
+        });
+    }
+
+    public List<Map<String, Object>> getRecentDecisions(int maxSessions, String tagFilter) throws SQLException {
+        return dataSource.withConnection(conn -> {
+            List<Map<String, Object>> results = new ArrayList<>();
+            String sql;
+            if (tagFilter != null && !tagFilter.isBlank()) {
+                sql = """
+                    SELECT session_id, decision_text, context, decided_at, tags
+                    FROM session_decisions
+                    WHERE LOWER(tags) LIKE LOWER('%' || ? || '%')
+                    ORDER BY decided_at DESC
+                    LIMIT ?
+                    """;
+            } else {
+                sql = """
+                    SELECT session_id, decision_text, context, decided_at, tags
+                    FROM session_decisions
+                    ORDER BY decided_at DESC
+                    LIMIT ?
+                    """;
+            }
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                int idx = 1;
+                if (tagFilter != null && !tagFilter.isBlank()) ps.setString(idx++, tagFilter);
+                ps.setInt(idx, maxSessions > 0 ? maxSessions * 10 : 50);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("session_id", rs.getString("session_id"));
+                        row.put("decision_text", rs.getString("decision_text"));
+                        row.put("context", rs.getString("context"));
+                        row.put("decided_at", String.valueOf(rs.getTimestamp("decided_at")));
+                        row.put("tags", rs.getString("tags"));
+                        results.add(row);
+                    }
+                }
+            }
+            return results;
+        });
+    }
+
+    /**
+     * Search session transcripts by phrase (case-insensitive LIKE match).
+     */
+    public List<Map<String, Object>> searchSessions(String phrase, int maxResults) throws SQLException {
+        return dataSource.withConnection(conn -> {
+            List<Map<String, Object>> results = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    SELECT session_id, message_index, role, content, tool_name, token_estimate
+                    FROM session_transcripts
+                    WHERE message_index >= 0 AND LOWER(content) LIKE LOWER('%' || ? || '%')
+                    ORDER BY session_id DESC, message_index
+                    LIMIT ?
+                    """)) {
+                ps.setString(1, phrase);
+                ps.setInt(2, maxResults);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("session_id", rs.getString("session_id"));
+                        row.put("message_index", rs.getInt("message_index"));
+                        row.put("role", rs.getString("role"));
+                        String content = rs.getString("content");
+                        row.put("preview", content.length() > 300 ? content.substring(0, 300) + "..." : content);
+                        row.put("tool_name", rs.getString("tool_name"));
+                        results.add(row);
+                    }
+                }
+            }
+            return results;
+        });
+    }
+
     private String extractSessionId(Path file) {
         String fileName = file.getFileName().toString();
         return fileName.endsWith(".jsonl")

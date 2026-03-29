@@ -30,6 +30,8 @@ public class JavaDuckerMcpServer {
     static final String BASE_URL = "http://" + HOST + ":" + PORT + "/api";
     static final ObjectMapper MAPPER = new ObjectMapper();
     static final HttpClient HTTP = HttpClient.newHttpClient();
+    static final boolean STALENESS_CHECK_ENABLED =
+        !"false".equalsIgnoreCase(System.getenv("JAVADUCKER_STALENESS_CHECK"));
 
     public static void main(String[] args) throws Exception {
         ensureServerRunning();
@@ -63,10 +65,19 @@ public class JavaDuckerMcpServer {
                         "mode",   str("exact, semantic, or hybrid (default)"),
                         "max_results", intParam("Max results to return (default 20)")),
                         "phrase")),
-                (ex, a) -> call(() -> search(
-                    (String) a.get("phrase"),
-                    (String) a.getOrDefault("mode", "hybrid"),
-                    a.containsKey("max_results") ? ((Number) a.get("max_results")).intValue() : 20)))
+                (ex, a) -> call(() -> {
+                    Map<String, Object> result = search(
+                        (String) a.get("phrase"),
+                        (String) a.getOrDefault("mode", "hybrid"),
+                        a.containsKey("max_results") ? ((Number) a.get("max_results")).intValue() : 20);
+                    try {
+                        if (STALENESS_CHECK_ENABLED && result.containsKey("staleness_warning")) {
+                            result.put("_footer", "\n⚠️ " + result.get("staleness_warning")
+                                + " Use javaducker_index_file to refresh.");
+                        }
+                    } catch (Exception ignored) { }
+                    return result;
+                }))
             .tool(
                 tool("javaducker_get_file_text",
                     "Retrieve the full extracted text of an indexed file by artifact_id. " +
@@ -109,7 +120,24 @@ public class JavaDuckerMcpServer {
                     schema(props(
                         "artifact_id", str("Artifact ID to summarize")),
                         "artifact_id")),
-                (ex, a) -> call(() -> summarize((String) a.get("artifact_id"))))
+                (ex, a) -> call(() -> {
+                    String artifactId = (String) a.get("artifact_id");
+                    Map<String, Object> summary = summarize(artifactId);
+                    if (STALENESS_CHECK_ENABLED) {
+                        try {
+                            Map<String, Object> status = getArtifactStatus(artifactId);
+                            String path = (String) status.get("original_client_path");
+                            if (path != null && !path.isBlank()) {
+                                Map<String, Object> staleness = httpPost("/stale", Map.of("file_paths", List.of(path)));
+                                List<?> staleList = (List<?>) staleness.get("stale");
+                                if (staleList != null && !staleList.isEmpty()) {
+                                    summary.put("_warning", "⚠️ This file has changed since indexing — summary may be outdated.");
+                                }
+                            }
+                        } catch (Exception ignored) { }
+                    }
+                    return summary;
+                }))
             .tool(
                 tool("javaducker_map",
                     "Get a project map showing directory structure, file counts, largest files, and " +
@@ -331,10 +359,67 @@ public class JavaDuckerMcpServer {
                     "Runtime config for a Reladomo object: DB connection, cache strategy. Omit name for full topology.",
                     schema(props("object_name", str("Object name (optional)")))),
                 (ex, a) -> call(() -> httpGet("/reladomo/config" + (a.containsKey("object_name") ? "?objectName=" + a.get("object_name") : ""))))
+            // ── Session Transcript tools ─────────────────────────────────
+            .tool(tool("javaducker_index_sessions",
+                    "Index Claude Code session transcripts from a project directory. Makes past conversations searchable.",
+                    schema(props(
+                        "project_path", str("Path to project sessions directory (e.g. ~/.claude/projects/<hash>/)"),
+                        "max_sessions", intParam("Max sessions to index (default: all)"),
+                        "incremental", str("true to skip unchanged files (default: false)")),
+                        "project_path")),
+                (ex, a) -> call(() -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("projectPath", a.get("project_path"));
+                    if (a.containsKey("max_sessions")) body.put("maxSessions", ((Number) a.get("max_sessions")).intValue());
+                    if ("true".equals(a.get("incremental"))) body.put("incremental", true);
+                    return httpPost("/index-sessions", body);
+                }))
+            .tool(tool("javaducker_search_sessions",
+                    "Search past Claude Code conversations. Returns matching excerpts with session ID and role.",
+                    schema(props(
+                        "phrase", str("Search phrase"),
+                        "max_results", intParam("Max results (default 20)")),
+                        "phrase")),
+                (ex, a) -> call(() -> httpPost("/search-sessions", Map.of(
+                    "phrase", a.get("phrase"),
+                    "max_results", ((Number) a.getOrDefault("max_results", 20)).intValue()))))
+            .tool(tool("javaducker_session_context",
+                    "Get full historical context for a topic: session excerpts + related artifacts. One call for complete history.",
+                    schema(props("topic", str("Topic or query to search for")), "topic")),
+                (ex, a) -> call(() -> sessionContext((String) a.get("topic"))))
+            // ── Session Decision tools ──────────────────────────────────
+            .tool(tool("javaducker_extract_decisions",
+                    "Store decisions extracted from a session. Claude calls this after reading a session to record key decisions.",
+                    schema(props(
+                        "session_id", str("Session ID"),
+                        "decisions", str("JSON array of {text, context?, tags?} objects")),
+                        "session_id", "decisions")),
+                (ex, a) -> call(() -> {
+                    List<Map<String, String>> decisions = MAPPER.readValue((String) a.get("decisions"), new TypeReference<>() {});
+                    return httpPost("/extract-session-decisions", Map.of("sessionId", a.get("session_id"), "decisions", decisions));
+                }))
+            .tool(tool("javaducker_recent_decisions",
+                    "List recent decisions from past sessions, optionally filtered by tag.",
+                    schema(props(
+                        "max_sessions", intParam("Max sessions to look back (default 5)"),
+                        "tag", str("Optional tag filter")))),
+                (ex, a) -> call(() -> httpGet("/session-decisions?maxSessions=" +
+                    ((Number) a.getOrDefault("max_sessions", 5)).intValue() +
+                    (a.containsKey("tag") ? "&tag=" + encode((String) a.get("tag")) : ""))))
             .build();
     }
 
     // ── Tool implementations ──────────────────────────────────────────────────
+
+    static Map<String, Object> sessionContext(String topic) throws Exception {
+        Map<String, Object> sessionHits = httpPost("/search-sessions", Map.of("phrase", topic, "max_results", 5));
+        Map<String, Object> artifactHits = search(topic, "hybrid", 5);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("topic", topic);
+        result.put("session_excerpts", sessionHits.get("results"));
+        result.put("related_artifacts", artifactHits.get("results"));
+        return result;
+    }
 
     static Map<String, Object> health() throws Exception {
         return httpGet("/health");

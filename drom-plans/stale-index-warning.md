@@ -1,6 +1,6 @@
 ---
 title: Stale Index Warning
-status: in-progress
+status: completed
 created: 2026-03-28
 updated: 2026-03-28
 current_chapter: 4
@@ -59,12 +59,12 @@ Enhance the existing staleness infrastructure (`StalenessService`, `javaducker_s
 > This is the tool Claude calls proactively or when starting a session. The response is designed to be actionable — it tells Claude exactly what to do next.
 
 ## Chapter 4: Search-Time Hook (MCP Server Enhancement)
-**Status:** pending
+**Status:** completed
 **Depends on:** Chapter 2, Chapter 3
 
-- [ ] In `JavaDuckerMcpServer`, wrap the `javaducker_search` handler: after returning search results, if `staleness_warning` is non-null, append a footer line: `"\n⚠️ {warning} Use javaducker_index to refresh."`
-- [ ] Similarly, wrap `javaducker_summarize` — if the artifact being summarized is stale, prepend: `"⚠️ This file has changed since indexing — summary may be outdated."`
-- [ ] Add a `--staleness-check` flag (default: on) to the MCP server config so users can disable if overhead is unwanted
+- [x] In `JavaDuckerMcpServer`, wrap the `javaducker_search` handler: after returning search results, if `staleness_warning` is non-null, append a footer line: `"\n⚠️ {warning} Use javaducker_index to refresh."`
+- [x] Similarly, wrap `javaducker_summarize` — if the artifact being summarized is stale, prepend: `"⚠️ This file has changed since indexing — summary may be outdated."`
+- [x] Add a `--staleness-check` flag (default: on) to the MCP server config so users can disable if overhead is unwanted
 - [ ] Test: verify search result includes footer when stale, omits when current
 
 **Notes:**

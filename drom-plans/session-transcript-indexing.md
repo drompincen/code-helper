@@ -1,9 +1,9 @@
 ---
 title: Session Transcript Indexing
-status: in-progress
+status: completed
 created: 2026-03-28
 updated: 2026-03-28
-current_chapter: 3
+current_chapter: 4
 ---
 
 # Plan: Session Transcript Indexing
@@ -38,26 +38,26 @@ Index Claude Code conversation transcripts from `~/.claude/projects/` so that pa
 > Sessions can be large (100K+ tokens). Only index assistant and user messages — skip tool_result payloads (they're the code itself, already indexed). Decision extraction happens in Chapter 4.
 
 ## Chapter 3: REST Endpoints & MCP Tools
-**Status:** pending
+**Status:** completed
 **Depends on:** Chapter 2
 
-- [ ] Add REST endpoints to `JavaDuckerRestController`: `POST /api/index-sessions` (body: `{projectPath, maxSessions?}`), `GET /api/sessions` (list indexed sessions with date, token count), `GET /api/session/{sessionId}` (full transcript), `POST /api/search-sessions` (body: `{phrase, mode, maxResults}` — search only session content)
-- [ ] Add MCP tools to `JavaDuckerMcpServer.java`: `javaducker_index_sessions` (index sessions from a project path), `javaducker_search_sessions` (search past conversations — phrase, mode), `javaducker_session_decisions` (list decisions extracted from sessions, optionally filtered by tag)
-- [ ] Add `javaducker_session_context` MCP tool — given a topic/query, return a compact context bundle: relevant session excerpts + any related MEMORY.md entries + related artifacts. One call to get full historical context
-- [ ] Write integration test — index sample session JSONL, search it, verify results
+- [x] Add REST endpoints to `JavaDuckerRestController`: `POST /api/index-sessions` (body: `{projectPath, maxSessions?}`), `GET /api/sessions` (list indexed sessions with date, token count), `GET /api/session/{sessionId}` (full transcript), `POST /api/search-sessions` (body: `{phrase, mode, maxResults}` — search only session content)
+- [x] Add MCP tools to `JavaDuckerMcpServer.java`: `javaducker_index_sessions` (index sessions from a project path), `javaducker_search_sessions` (search past conversations — phrase, mode), `javaducker_session_decisions` (list decisions extracted from sessions, optionally filtered by tag)
+- [x] Add `javaducker_session_context` MCP tool — given a topic/query, return a compact context bundle: relevant session excerpts + any related MEMORY.md entries + related artifacts. One call to get full historical context
+- [x] Write integration test — index sample session JSONL, search it, verify results
 
 **Notes:**
 > `javaducker_session_context` is the high-value tool — it's what Claude calls when it needs to understand history. Keep the response compact: excerpts, not full transcripts.
 
 ## Chapter 4: Decision Extraction & Session Summaries
-**Status:** pending
+**Status:** completed
 **Depends on:** Chapter 3
 
-- [ ] Add `POST /api/extract-session-decisions` endpoint — accepts sessionId + list of decisions (text, context, tags). Stores in `session_decisions` table. Designed to be called by Claude after reading a session
-- [ ] Add `javaducker_extract_decisions` MCP tool — write side for decision storage
-- [ ] Add `javaducker_recent_decisions` MCP tool — return decisions from last N sessions, filterable by tag/topic
-- [ ] Create `scripts/index-sessions.sh` — helper script that finds the project path in `~/.claude/projects/` and calls the index endpoint. Can be wired as a SessionStart hook for auto-indexing
-- [ ] Write tests for decision storage and retrieval
+- [x] Add `POST /api/extract-session-decisions` endpoint — accepts sessionId + list of decisions (text, context, tags). Stores in `session_decisions` table. Designed to be called by Claude after reading a session
+- [x] Add `javaducker_extract_decisions` MCP tool — write side for decision storage
+- [x] Add `javaducker_recent_decisions` MCP tool — return decisions from last N sessions, filterable by tag/topic
+- [x] Create `scripts/index-sessions.sh` — helper script that finds the project path in `~/.claude/projects/` and calls the index endpoint. Can be wired as a SessionStart hook for auto-indexing
+- [x] Write tests for decision storage and retrieval
 
 **Notes:**
 > Decision extraction is LLM-driven — Claude reads the transcript and identifies decisions. The MCP tool just stores what Claude extracts. This pairs with the content intelligence enrichment pipeline (O3).

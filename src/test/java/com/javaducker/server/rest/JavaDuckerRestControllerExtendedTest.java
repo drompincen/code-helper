@@ -38,6 +38,7 @@ class JavaDuckerRestControllerExtendedTest {
     @MockBean ExplainService explainService;
     @MockBean GitBlameService gitBlameService;
     @MockBean CoChangeService coChangeService;
+    @MockBean SessionIngestionService sessionIngestionService;
 
     // ── Search with staleness banner ─────────────────────────────────────
 
@@ -452,5 +453,82 @@ class JavaDuckerRestControllerExtendedTest {
         mockMvc.perform(get("/api/reladomo/config"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.config").exists());
+    }
+
+    // ── Session Transcript endpoint tests ───────────────────────────────
+
+    @Test
+    void indexSessionsReturnsResult() throws Exception {
+        when(sessionIngestionService.indexSessions(anyString(), anyInt()))
+                .thenReturn(Map.of("sessions_indexed", 3, "sessions_skipped", 0,
+                        "total_messages", 42, "project_path", "/tmp/sessions"));
+        String body = objectMapper.writeValueAsString(Map.of("projectPath", "/tmp/sessions"));
+        mockMvc.perform(post("/api/index-sessions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sessions_indexed").value(3))
+                .andExpect(jsonPath("$.total_messages").value(42));
+    }
+
+    @Test
+    void indexSessionsIncrementalReturnsResult() throws Exception {
+        when(sessionIngestionService.indexSessionsIncremental(anyString(), anyInt()))
+                .thenReturn(Map.of("sessions_indexed", 1, "sessions_skipped", 2,
+                        "total_messages", 10, "project_path", "/tmp/sessions"));
+        String body = objectMapper.writeValueAsString(Map.of(
+                "projectPath", "/tmp/sessions", "incremental", true));
+        mockMvc.perform(post("/api/index-sessions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sessions_indexed").value(1))
+                .andExpect(jsonPath("$.sessions_skipped").value(2));
+    }
+
+    @Test
+    void listSessionsReturnsData() throws Exception {
+        when(sessionIngestionService.getSessionList()).thenReturn(List.of(
+                Map.of("session_id", "abc-123", "message_count", 15, "total_tokens", 5000L)));
+        mockMvc.perform(get("/api/sessions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.sessions[0].session_id").value("abc-123"));
+    }
+
+    @Test
+    void getSessionReturnsMessages() throws Exception {
+        when(sessionIngestionService.getSession("abc-123")).thenReturn(List.of(
+                Map.of("session_id", "abc-123", "message_index", 0, "role", "user",
+                        "content", "hello", "token_estimate", 5)));
+        mockMvc.perform(get("/api/session/abc-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.session_id").value("abc-123"))
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.messages[0].role").value("user"));
+    }
+
+    @Test
+    void getSessionNotFound() throws Exception {
+        when(sessionIngestionService.getSession("nonexistent")).thenReturn(List.of());
+        mockMvc.perform(get("/api/session/nonexistent"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void searchSessionsReturnsResults() throws Exception {
+        when(sessionIngestionService.searchSessions(anyString(), anyInt())).thenReturn(List.of(
+                Map.of("session_id", "abc-123", "message_index", 5, "role", "assistant",
+                        "preview", "We decided to use Kafka", "tool_name", "")));
+        String body = objectMapper.writeValueAsString(Map.of("phrase", "Kafka"));
+        mockMvc.perform(post("/api/search-sessions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_results").value(1))
+                .andExpect(jsonPath("$.results[0].session_id").value("abc-123"));
+    }
+
+    @Test
+    void searchSessionsEmptyResults() throws Exception {
+        when(sessionIngestionService.searchSessions(anyString(), anyInt())).thenReturn(List.of());
+        String body = objectMapper.writeValueAsString(Map.of("phrase", "nonexistent topic"));
+        mockMvc.perform(post("/api/search-sessions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_results").value(0));
     }
 }
