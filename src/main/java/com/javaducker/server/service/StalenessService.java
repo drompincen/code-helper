@@ -71,6 +71,34 @@ public class StalenessService {
         return result;
     }
 
+    public Map<String, Object> checkAll() throws SQLException {
+        String sql = "SELECT DISTINCT original_client_path FROM artifacts "
+                + "WHERE status = 'INDEXED' AND original_client_path IS NOT NULL";
+
+        List<String> allPaths = dataSource.withConnection(conn -> {
+            List<String> paths = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(sql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    paths.add(rs.getString("original_client_path"));
+                }
+            }
+            return paths;
+        });
+
+        Map<String, Object> result = checkStaleness(allPaths);
+        computeStaleSummary(result);
+        return result;
+    }
+
+    static void computeStaleSummary(Map<String, Object> result) {
+        List<?> staleList = (List<?>) result.get("stale");
+        int staleCount = staleList != null ? staleList.size() : 0;
+        long total = (long) result.get("total_checked");
+        result.put("stale_count", staleCount);
+        result.put("stale_percentage", total > 0 ? (staleCount * 100.0 / total) : 0.0);
+    }
+
     private List<Map<String, Object>> queryArtifacts(String path) throws SQLException {
         String sql = "SELECT artifact_id, file_name, original_client_path, indexed_at "
                 + "FROM artifacts WHERE original_client_path = ? AND status = 'INDEXED'";

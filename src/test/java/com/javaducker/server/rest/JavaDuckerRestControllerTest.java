@@ -10,6 +10,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +35,9 @@ class JavaDuckerRestControllerTest {
     @MockBean FileWatcher fileWatcher;
     @MockBean ReladomoQueryService reladomoQueryService;
     @MockBean ContentIntelligenceService contentIntelligenceService;
+    @MockBean ExplainService explainService;
+    @MockBean GitBlameService gitBlameService;
+    @MockBean CoChangeService coChangeService;
 
     @Test
     void healthReturnsOk() throws Exception {
@@ -96,6 +100,87 @@ class JavaDuckerRestControllerTest {
         mockMvc.perform(get("/api/stats"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total_artifacts").value(10));
+    }
+
+    // ── Explain endpoint tests ────────────────────────────────────────────
+
+    @Test
+    void explainNotFoundWhenArtifactMissing() throws Exception {
+        when(explainService.explain("nonexistent")).thenReturn(null);
+        mockMvc.perform(get("/api/explain/nonexistent"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void explainReturnsDataForKnownArtifact() throws Exception {
+        when(explainService.explain("abc-123")).thenReturn(Map.of(
+                "file", Map.of("artifact_id", "abc-123", "file_name", "Test.java"),
+                "summary", Map.of("classes", List.of("Test")),
+                "dependencies", List.of(),
+                "dependents", List.of()));
+        mockMvc.perform(get("/api/explain/abc-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.file.artifact_id").value("abc-123"));
+    }
+
+    @Test
+    void explainByPathRequiresFilePath() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of());
+        mockMvc.perform(post("/api/explain").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("filePath is required"));
+    }
+
+    @Test
+    void explainByPathReturnsData() throws Exception {
+        when(explainService.explainByPath("/src/Test.java")).thenReturn(Map.of(
+                "file", Map.of("artifact_id", "abc-123", "file_name", "Test.java")));
+        String body = objectMapper.writeValueAsString(Map.of("filePath", "/src/Test.java"));
+        mockMvc.perform(post("/api/explain").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.file.artifact_id").value("abc-123"));
+    }
+
+    // ── Git Blame endpoint tests ──────────────────────────────────────────
+
+    @Test
+    void blameByPathReturnsEntries() throws Exception {
+        when(gitBlameService.blame("src/main/java/App.java")).thenReturn(List.of(
+                new GitBlameService.BlameEntry(1, 10, "abcdef1234567890abcdef1234567890abcdef12",
+                        "alice", Instant.parse("2026-03-20T10:00:00Z"), "Add auth middleware", "code...")));
+        String body = objectMapper.writeValueAsString(Map.of("filePath", "src/main/java/App.java"));
+        mockMvc.perform(post("/api/blame").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.file").value("src/main/java/App.java"))
+                .andExpect(jsonPath("$.blame[0].lines").value("1-10"))
+                .andExpect(jsonPath("$.blame[0].commit").value("abcdef12"))
+                .andExpect(jsonPath("$.blame[0].author").value("alice"));
+    }
+
+    @Test
+    void blameByPathWithLineRange() throws Exception {
+        when(gitBlameService.blameForLines("src/main/java/App.java", 5, 15)).thenReturn(List.of(
+                new GitBlameService.BlameEntry(5, 5, "1234567890abcdef1234567890abcdef12345678",
+                        "bob", Instant.parse("2026-03-21T12:00:00Z"), "Fix NPE", "line5")));
+        String body = objectMapper.writeValueAsString(Map.of(
+                "filePath", "src/main/java/App.java", "startLine", 5, "endLine", 15));
+        mockMvc.perform(post("/api/blame").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.blame[0].lines").value("5"))
+                .andExpect(jsonPath("$.blame[0].author").value("bob"));
+    }
+
+    @Test
+    void blameByArtifactIdReturnsEnrichedResult() throws Exception {
+        when(gitBlameService.blameForArtifact("abc-123")).thenReturn(List.of(
+                new GitBlameService.BlameEntry(1, 20, "abcdef1234567890abcdef1234567890abcdef12",
+                        "alice", Instant.parse("2026-03-20T10:00:00Z"), "Initial commit", "code")));
+        when(artifactService.getSummary("abc-123")).thenReturn(Map.of("classes", List.of("App")));
+        mockMvc.perform(get("/api/blame/abc-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.artifact_id").value("abc-123"))
+                .andExpect(jsonPath("$.summary.classes[0]").value("App"))
+                .andExpect(jsonPath("$.blame[0].lines").value("1-20"));
     }
 
     // ── Content Intelligence: write endpoint tests ───────────────────────
@@ -193,5 +278,59 @@ class JavaDuckerRestControllerTest {
         when(contentIntelligenceService.getSynthesis("nonexistent")).thenReturn(null);
         mockMvc.perform(get("/api/synthesis/nonexistent"))
                 .andExpect(status().isNotFound());
+    }
+
+    // ── Co-Change / Related Files endpoint tests ────────────────────────
+
+    @Test
+    void relatedByPathReturnsResults() throws Exception {
+        when(coChangeService.getRelatedFiles(eq("/src/Main.java"), eq(10)))
+                .thenReturn(List.of(Map.of("related_file", "/src/Config.java",
+                        "co_change_count", 5, "last_commit_date", "2026-03-01")));
+        String body = objectMapper.writeValueAsString(Map.of("filePath", "/src/Main.java"));
+        mockMvc.perform(post("/api/related").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.file_path").value("/src/Main.java"))
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.related[0].related_file").value("/src/Config.java"));
+    }
+
+    @Test
+    void relatedByPathReturnsEmptyList() throws Exception {
+        when(coChangeService.getRelatedFiles(anyString(), anyInt())).thenReturn(List.of());
+        String body = objectMapper.writeValueAsString(Map.of("filePath", "/src/Unknown.java"));
+        mockMvc.perform(post("/api/related").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(0))
+                .andExpect(jsonPath("$.related").isEmpty());
+    }
+
+    @Test
+    void rebuildCoChangeReturnsRebuilt() throws Exception {
+        mockMvc.perform(post("/api/rebuild-cochange").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("rebuilt"));
+    }
+
+    @Test
+    void relatedByArtifactNotFound() throws Exception {
+        when(artifactService.getStatus("nonexistent")).thenReturn(null);
+        mockMvc.perform(get("/api/related/nonexistent"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void relatedByArtifactReturnsResults() throws Exception {
+        when(artifactService.getStatus("abc-123")).thenReturn(Map.of(
+                "artifact_id", "abc-123", "original_client_path", "/src/Main.java",
+                "status", "INDEXED"));
+        when(coChangeService.getRelatedFiles(eq("/src/Main.java"), eq(10)))
+                .thenReturn(List.of(Map.of("related_file", "/src/Config.java",
+                        "co_change_count", 3, "last_commit_date", "2026-03-01")));
+        mockMvc.perform(get("/api/related/abc-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.artifact_id").value("abc-123"))
+                .andExpect(jsonPath("$.file_path").value("/src/Main.java"))
+                .andExpect(jsonPath("$.count").value(1));
     }
 }

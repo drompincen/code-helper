@@ -38,6 +38,7 @@ import java.util.stream.Stream;
                 JavaDuckerClient.ConceptTimelineCmd.class,
                 JavaDuckerClient.StaleContentCmd.class,
                 JavaDuckerClient.ConceptHealthCmd.class,
+                JavaDuckerClient.IndexHealthCmd.class,
         })
 public class JavaDuckerClient implements Runnable {
 
@@ -563,6 +564,56 @@ public class JavaDuckerClient implements Runnable {
                                 c.get("active_docs") + " active, " + c.get("stale_docs") + " stale [" +
                                 c.get("trend") + "]");
                     }
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+    }
+
+    // ── Index Health CLI command ─────────────────────────────
+    @Command(name = "index-health", description = "Check index health: current vs stale files with recommendation")
+    static class IndexHealthCmd implements Runnable {
+        @CommandLine.ParentCommand JavaDuckerClient parent;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void run() {
+            try {
+                Map<String, Object> resp = get(baseUrl(parent) + "/stale/summary");
+                int staleCount = resp.get("stale_count") != null
+                        ? ((Number) resp.get("stale_count")).intValue() : 0;
+                double stalePercent = resp.get("stale_percentage") != null
+                        ? ((Number) resp.get("stale_percentage")).doubleValue() : 0.0;
+                long total = resp.get("total_checked") != null
+                        ? ((Number) resp.get("total_checked")).longValue() : 0;
+                int currentCount = resp.get("current") != null
+                        ? ((Number) resp.get("current")).intValue() : 0;
+
+                String status = stalePercent > 10 ? "DEGRADED" : "HEALTHY";
+                System.out.println("Index Health: " + status);
+                System.out.println("  Total files:   " + total);
+                System.out.println("  Current:       " + currentCount);
+                System.out.println("  Stale:         " + staleCount
+                        + " (" + String.format("%.1f", stalePercent) + "%)");
+
+                if (staleCount > 0) {
+                    List<Map<String, Object>> staleFiles =
+                            (List<Map<String, Object>>) resp.get("stale");
+                    if (staleFiles != null) {
+                        System.out.println("  Stale files:");
+                        for (Map<String, Object> f : staleFiles) {
+                            System.out.println("    " + f.get("original_client_path"));
+                        }
+                    }
+                    if (stalePercent > 10) {
+                        System.out.println("\nRecommendation: >10% stale — run a full re-index.");
+                    } else {
+                        System.out.println("\nRecommendation: Re-index the listed stale files.");
+                    }
+                } else {
+                    System.out.println("\nAll indexed files are current. No action needed.");
                 }
             } catch (Exception e) {
                 System.err.println("Error: " + e.getMessage());
