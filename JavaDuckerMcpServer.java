@@ -154,6 +154,38 @@ public class JavaDuckerMcpServer {
                     (String) a.get("action"),
                     (String) a.getOrDefault("directory", ""),
                     (String) a.getOrDefault("extensions", ""))))
+            // ── Explain tool ─────────────────────────────────────────────
+            .tool(tool("javaducker_explain",
+                    "Get everything JavaDucker knows about a file: summary, dependencies, dependents, tags, " +
+                    "classification, related plans, blame highlights, and co-change partners. One call for full context.",
+                    schema(props("file_path", str("Absolute path to the file to explain")), "file_path")),
+                (ex, a) -> call(() -> httpPost("/explain", Map.of("filePath", a.get("file_path")))))
+            // ── Git Blame tool ───────────────────────────────────────────
+            .tool(tool("javaducker_blame",
+                    "Show who last changed each line of a file, with commit info. Groups consecutive lines by same commit. Optionally narrow to a line range.",
+                    schema(props(
+                        "file_path", str("Absolute path to the file"),
+                        "start_line", intParam("Start line number (optional)"),
+                        "end_line", intParam("End line number (optional)")),
+                        "file_path")),
+                (ex, a) -> call(() -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("filePath", a.get("file_path"));
+                    if (a.containsKey("start_line")) body.put("startLine", ((Number) a.get("start_line")).intValue());
+                    if (a.containsKey("end_line")) body.put("endLine", ((Number) a.get("end_line")).intValue());
+                    return httpPost("/blame", body);
+                }))
+            // ── Co-Change / Related Files tool ─────────────────────────
+            .tool(tool("javaducker_related",
+                    "Find files commonly edited together with this file, based on git co-change history. " +
+                    "Helps identify related files you might need to update.",
+                    schema(props(
+                        "file_path", str("Absolute path to the file"),
+                        "max_results", intParam("Max results (default 10)")),
+                        "file_path")),
+                (ex, a) -> call(() -> httpPost("/related", Map.of(
+                    "filePath", a.get("file_path"),
+                    "maxResults", ((Number) a.getOrDefault("max_results", 10)).intValue()))))
             // ── Content Intelligence: write tools ────────────────────────
             .tool(tool("javaducker_classify",
                     "Classify an artifact by doc type (ADR, DESIGN_DOC, PLAN, MEETING_NOTES, THREAD, SCRATCH, CODE, REFERENCE, TICKET).",
@@ -257,6 +289,12 @@ public class JavaDuckerMcpServer {
                     "Health report for all concepts: active/stale doc counts, trend (active/fading/cold).",
                     "{}"),
                 (ex, a) -> call(() -> httpGet("/concept-health")))
+            // ── Index Health tool ────────────────────────────────────────
+            .tool(tool("javaducker_index_health",
+                    "Check index health: how many files are current vs stale. Returns actionable recommendation. " +
+                    "No parameters required — scans all indexed files.",
+                    "{}"),
+                (ex, a) -> call(JavaDuckerMcpServer::indexHealth))
             // ── Reladomo tools ───────────────────────────────────────────
             .tool(tool("javaducker_reladomo_relationships",
                     "Get a Reladomo object's attributes, relationships, and metadata in one call.",
@@ -462,6 +500,33 @@ public class JavaDuckerMcpServer {
         Map<String, Object> r = httpGet("/dependents/" + artifactId);
         if (r == null) throw new RuntimeException("Artifact not found: " + artifactId);
         return r;
+    }
+
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> indexHealth() throws Exception {
+        Map<String, Object> summary = httpGet("/stale/summary");
+        int staleCount = ((Number) summary.getOrDefault("stale_count", 0)).intValue();
+        double stalePercent = ((Number) summary.getOrDefault("stale_percentage", 0.0)).doubleValue();
+        long total = ((Number) summary.getOrDefault("total_checked", 0)).longValue();
+
+        String recommendation;
+        if (staleCount == 0) {
+            recommendation = "All " + total + " indexed files are current. No action needed.";
+        } else if (stalePercent > 10) {
+            recommendation = "More than 10% of indexed files are stale (" + staleCount + "/" + total
+                    + "). Consider running a full re-index with javaducker_index_directory.";
+        } else {
+            List<Map<String, Object>> staleFiles = (List<Map<String, Object>>) summary.get("stale");
+            List<String> paths = staleFiles != null
+                    ? staleFiles.stream().limit(5)
+                        .map(f -> (String) f.get("original_client_path"))
+                        .filter(Objects::nonNull).toList()
+                    : List.of();
+            recommendation = staleCount + " file(s) are stale. Re-index them with javaducker_index_file: " + paths;
+        }
+        summary.put("recommendation", recommendation);
+        summary.put("health_status", stalePercent > 10 ? "degraded" : "healthy");
+        return summary;
     }
 
     // ── HTTP helpers ──────────────────────────────────────────────────────────

@@ -378,6 +378,55 @@ public class SchemaBootstrap {
                     ON artifacts (enrichment_status)
                 """);
 
+            // Co-change analysis cache
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS cochange_cache (
+                    file_a VARCHAR NOT NULL,
+                    file_b VARCHAR NOT NULL,
+                    co_change_count INTEGER,
+                    last_commit_date TIMESTAMP,
+                    PRIMARY KEY (file_a, file_b)
+                )
+                """);
+
+            // Session transcript tables
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS session_transcripts (
+                    session_id VARCHAR NOT NULL,
+                    project_path VARCHAR,
+                    message_index INTEGER,
+                    role VARCHAR,
+                    content VARCHAR,
+                    tool_name VARCHAR,
+                    timestamp TIMESTAMP,
+                    token_estimate INTEGER,
+                    PRIMARY KEY (session_id, message_index)
+                )
+                """);
+
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS session_decisions (
+                    session_id VARCHAR NOT NULL,
+                    decision_text VARCHAR,
+                    context VARCHAR,
+                    decided_at TIMESTAMP,
+                    tags VARCHAR
+                )
+                """);
+
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_transcripts_session
+                    ON session_transcripts (session_id)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_transcripts_role
+                    ON session_transcripts (role)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_decisions_tags
+                    ON session_decisions (tags)
+                """);
+
             log.info("Database schema created/verified");
         }
     }

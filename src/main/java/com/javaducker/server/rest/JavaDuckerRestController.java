@@ -7,10 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -27,13 +24,19 @@ public class JavaDuckerRestController {
     private final FileWatcher fileWatcher;
     private final ReladomoQueryService reladomoQueryService;
     private final ContentIntelligenceService contentIntelligenceService;
+    private final GitBlameService gitBlameService;
+    private final CoChangeService coChangeService;
+    private final ExplainService explainService;
 
     public JavaDuckerRestController(UploadService uploadService, ArtifactService artifactService,
                                      SearchService searchService, StatsService statsService,
                                      ProjectMapService projectMapService, StalenessService stalenessService,
                                      DependencyService dependencyService, FileWatcher fileWatcher,
                                      ReladomoQueryService reladomoQueryService,
-                                     ContentIntelligenceService contentIntelligenceService) {
+                                     ContentIntelligenceService contentIntelligenceService,
+                                     GitBlameService gitBlameService,
+                                     CoChangeService coChangeService,
+                                     ExplainService explainService) {
         this.uploadService = uploadService;
         this.artifactService = artifactService;
         this.searchService = searchService;
@@ -44,6 +47,9 @@ public class JavaDuckerRestController {
         this.fileWatcher = fileWatcher;
         this.reladomoQueryService = reladomoQueryService;
         this.contentIntelligenceService = contentIntelligenceService;
+        this.gitBlameService = gitBlameService;
+        this.coChangeService = coChangeService;
+        this.explainService = explainService;
     }
 
     @GetMapping("/health")
@@ -98,7 +104,54 @@ public class JavaDuckerRestController {
             case "semantic" -> searchService.semanticSearch(phrase, maxResults);
             default         -> searchService.hybridSearch(phrase, maxResults);
         };
-        return ResponseEntity.ok(Map.of("total_results", results.size(), "results", results));
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("total_results", results.size());
+        response.put("results", results);
+
+        if (!results.isEmpty()) {
+            try {
+                // Collect unique artifact IDs from results
+                Set<String> artifactIds = results.stream()
+                        .map(r -> (String) r.get("artifact_id"))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
+
+                // Look up original_client_path for each artifact
+                Map<String, String> artToPath = new HashMap<>();
+                for (String artId : artifactIds) {
+                    Map<String, String> status = artifactService.getStatus(artId);
+                    if (status != null && status.get("original_client_path") != null) {
+                        artToPath.put(artId, status.get("original_client_path"));
+                    }
+                }
+
+                List<String> filePaths = new ArrayList<>(new LinkedHashSet<>(artToPath.values()));
+                if (!filePaths.isEmpty()) {
+                    Map<String, Object> staleness = stalenessService.checkStaleness(filePaths);
+                    List<?> staleList = (List<?>) staleness.get("stale");
+                    if (staleList != null && !staleList.isEmpty()) {
+                        Set<String> stalePaths = new HashSet<>();
+                        for (Object s : staleList) {
+                            Map<?, ?> staleItem = (Map<?, ?>) s;
+                            stalePaths.add((String) staleItem.get("original_client_path"));
+                        }
+                        for (Map<String, Object> result : results) {
+                            String path = artToPath.get(result.get("artifact_id"));
+                            result.put("stale", path != null && stalePaths.contains(path));
+                        }
+                        int staleCount = stalePaths.size();
+                        response.put("staleness_warning",
+                                staleCount + " of " + filePaths.size()
+                                        + " result files are stale — run re-index to refresh.");
+                    }
+                }
+            } catch (Exception e) {
+                // Don't fail the search if staleness check fails
+            }
+        }
+
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/summary/{artifactId}")
@@ -111,6 +164,11 @@ public class JavaDuckerRestController {
     @GetMapping("/map")
     public ResponseEntity<Map<String, Object>> getProjectMap() throws Exception {
         return ResponseEntity.ok(projectMapService.getProjectMap());
+    }
+
+    @GetMapping("/stale/summary")
+    public ResponseEntity<Map<String, Object>> staleSummary() throws Exception {
+        return ResponseEntity.ok(stalenessService.checkAll());
     }
 
     @SuppressWarnings("unchecked")
@@ -164,6 +222,70 @@ public class JavaDuckerRestController {
                 "watching", fileWatcher.isWatching(),
                 "directory", fileWatcher.getWatchedDirectory() != null
                         ? fileWatcher.getWatchedDirectory().toString() : ""));
+    }
+
+    // ── Git Blame endpoints ────────────────────────────────────────────────
+
+    @GetMapping("/blame/{artifactId}")
+    public ResponseEntity<?> getBlame(@PathVariable String artifactId) throws Exception {
+        List<GitBlameService.BlameEntry> entries = gitBlameService.blameForArtifact(artifactId);
+        Map<String, Object> summary = artifactService.getSummary(artifactId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("artifact_id", artifactId);
+        if (summary != null) result.put("summary", summary);
+        result.put("blame", formatBlameEntries(entries));
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/blame")
+    public ResponseEntity<?> blameByPath(@RequestBody Map<String, Object> body) throws Exception {
+        String filePath = (String) body.get("filePath");
+        Integer startLine = body.containsKey("startLine") ? ((Number) body.get("startLine")).intValue() : null;
+        Integer endLine = body.containsKey("endLine") ? ((Number) body.get("endLine")).intValue() : null;
+        List<GitBlameService.BlameEntry> entries;
+        if (startLine != null && endLine != null) {
+            entries = gitBlameService.blameForLines(filePath, startLine, endLine);
+        } else {
+            entries = gitBlameService.blame(filePath);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("file", filePath);
+        result.put("blame", formatBlameEntries(entries));
+        return ResponseEntity.ok(result);
+    }
+
+    private List<Map<String, Object>> formatBlameEntries(List<GitBlameService.BlameEntry> entries) {
+        List<Map<String, Object>> formatted = new ArrayList<>();
+        for (GitBlameService.BlameEntry e : entries) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("lines", e.lineStart() == e.lineEnd()
+                    ? String.valueOf(e.lineStart())
+                    : e.lineStart() + "-" + e.lineEnd());
+            entry.put("commit", e.commitHash().substring(0, Math.min(8, e.commitHash().length())));
+            entry.put("author", e.author());
+            entry.put("date", e.authorDate() != null ? e.authorDate().toString() : null);
+            entry.put("message", e.commitMessage());
+            formatted.add(entry);
+        }
+        return formatted;
+    }
+
+    // ── Explain endpoints ─────────────────────────────────────────────────
+
+    @GetMapping("/explain/{artifactId}")
+    public ResponseEntity<?> explain(@PathVariable String artifactId) throws Exception {
+        Map<String, Object> result = explainService.explain(artifactId);
+        if (result == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/explain")
+    public ResponseEntity<?> explainByPath(@RequestBody Map<String, Object> body) throws Exception {
+        String filePath = (String) body.get("filePath");
+        if (filePath == null || filePath.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "filePath is required"));
+        }
+        return ResponseEntity.ok(explainService.explainByPath(filePath));
     }
 
     // ── Content Intelligence: write endpoints ──────────────────────────────
@@ -315,6 +437,40 @@ public class JavaDuckerRestController {
     public ResponseEntity<Map<String, Object>> searchSynthesis(@RequestParam String keyword) throws Exception {
         var results = contentIntelligenceService.searchSynthesis(keyword);
         return ResponseEntity.ok(Map.of("keyword", keyword, "results", results, "count", results.size()));
+    }
+
+    // ── Co-Change / Related Files endpoints ────────────────────────────
+
+    @GetMapping("/related/{artifactId}")
+    public ResponseEntity<?> getRelated(@PathVariable String artifactId) throws Exception {
+        Map<String, String> status = artifactService.getStatus(artifactId);
+        if (status == null) return ResponseEntity.notFound().build();
+        String path = status.get("original_client_path");
+        if (path == null || path.isBlank()) {
+            return ResponseEntity.ok(Map.of("artifact_id", artifactId, "related", List.of()));
+        }
+        List<Map<String, Object>> related = coChangeService.getRelatedFiles(path, 10);
+        return ResponseEntity.ok(Map.of(
+                "artifact_id", artifactId, "file_path", path,
+                "related", related, "count", related.size()));
+    }
+
+    @PostMapping("/related")
+    public ResponseEntity<?> relatedByPath(@RequestBody Map<String, Object> body) throws Exception {
+        String filePath = (String) body.get("filePath");
+        int maxResults = body.containsKey("maxResults")
+                ? ((Number) body.get("maxResults")).intValue() : 10;
+        boolean rebuild = Boolean.TRUE.equals(body.get("rebuild"));
+        if (rebuild) coChangeService.buildCoChangeIndex();
+        List<Map<String, Object>> related = coChangeService.getRelatedFiles(filePath, maxResults);
+        return ResponseEntity.ok(Map.of(
+                "file_path", filePath, "related", related, "count", related.size()));
+    }
+
+    @PostMapping("/rebuild-cochange")
+    public ResponseEntity<Map<String, Object>> rebuildCoChange() throws Exception {
+        coChangeService.buildCoChangeIndex();
+        return ResponseEntity.ok(Map.of("status", "rebuilt"));
     }
 
     // ── Reladomo endpoints ───────────────────────────────────────────────

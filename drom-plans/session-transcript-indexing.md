@@ -3,7 +3,7 @@ title: Session Transcript Indexing
 status: in-progress
 created: 2026-03-28
 updated: 2026-03-28
-current_chapter: 1
+current_chapter: 3
 ---
 
 # Plan: Session Transcript Indexing
@@ -11,28 +11,28 @@ current_chapter: 1
 Index Claude Code conversation transcripts from `~/.claude/projects/` so that past sessions are searchable. When Claude asks "what did we decide about auth last week?" it searches actual session history, not just MEMORY.md summaries.
 
 ## Chapter 1: Transcript Parser & Data Model
-**Status:** in-progress
+**Status:** completed
 **Depends on:** none
 
-- [ ] Create `SessionTranscriptParser.java` in `server/ingestion/` (~200 lines) — parse JSONL conversation files from `~/.claude/projects/`. Extract: role (user/assistant/tool), text content, tool names, timestamps, session ID. Skip binary/image content
-- [ ] Create `SessionTranscript` record in `server/model/` — fields: sessionId, projectPath, messageIndex, role, content, toolName, timestamp, tokenEstimate
-- [ ] Add `session_transcripts` table to `SchemaBootstrap` — `session_id VARCHAR NOT NULL, project_path VARCHAR, message_index INTEGER, role VARCHAR, content VARCHAR, tool_name VARCHAR, timestamp TIMESTAMP, token_estimate INTEGER, PRIMARY KEY (session_id, message_index)`
-- [ ] Add `session_decisions` table — `session_id VARCHAR NOT NULL, decision_text VARCHAR, context VARCHAR, decided_at TIMESTAMP, tags VARCHAR` — extracted decisions/conclusions from sessions
-- [ ] Add index: `idx_transcripts_session` on session_transcripts(session_id), `idx_transcripts_role` on session_transcripts(role), `idx_decisions_tags` on session_decisions(tags)
-- [ ] Write `SessionTranscriptParserTest` — test JSONL parsing, skip binary, handle malformed lines, empty files
+- [x] Create `SessionTranscriptParser.java` in `server/ingestion/` (~200 lines) — parse JSONL conversation files from `~/.claude/projects/`. Extract: role (user/assistant/tool), text content, tool names, timestamps, session ID. Skip binary/image content
+- [x] Create `SessionTranscript` record in `server/model/` — fields: sessionId, projectPath, messageIndex, role, content, toolName, timestamp, tokenEstimate
+- [x] Add `session_transcripts` table to `SchemaBootstrap` — `session_id VARCHAR NOT NULL, project_path VARCHAR, message_index INTEGER, role VARCHAR, content VARCHAR, tool_name VARCHAR, timestamp TIMESTAMP, token_estimate INTEGER, PRIMARY KEY (session_id, message_index)`
+- [x] Add `session_decisions` table — `session_id VARCHAR NOT NULL, decision_text VARCHAR, context VARCHAR, decided_at TIMESTAMP, tags VARCHAR` — extracted decisions/conclusions from sessions
+- [x] Add index: `idx_transcripts_session` on session_transcripts(session_id), `idx_transcripts_role` on session_transcripts(role), `idx_decisions_tags` on session_decisions(tags)
+- [x] Write `SessionTranscriptParserTest` — test JSONL parsing, skip binary, handle malformed lines, empty files
 
 **Notes:**
 > Claude Code stores sessions as JSONL in ~/.claude/projects/<project-hash>/. Each line is a JSON object with role, content, tool_use fields. The parser should be tolerant of format changes.
 
 ## Chapter 2: Ingestion & Chunking
-**Status:** pending
+**Status:** completed
 **Depends on:** Chapter 1
 
-- [ ] Create `SessionIngestionService.java` in `server/service/` (~180 lines) — scan a project directory for session files, parse each, chunk assistant messages (user messages are usually short), store in DuckDB. Dedup by session_id + message_index
-- [ ] Add session-aware chunking to `Chunker` or create `SessionChunker` — chunk long assistant responses, preserve tool call boundaries as chunk breaks, tag chunks with session_id
-- [ ] Hook into existing embedding pipeline — session chunks get TF-IDF embeddings like any other artifact, stored in `chunks` table with `source_type = 'session'`
-- [ ] Add incremental ingestion — track last-indexed session file modification time, only re-parse changed files
-- [ ] Write `SessionIngestionServiceTest` — test dedup, incremental skip, chunking boundaries
+- [x] Create `SessionIngestionService.java` in `server/service/` (~180 lines) — scan a project directory for session files, parse each, chunk assistant messages (user messages are usually short), store in DuckDB. Dedup by session_id + message_index
+- [x] Add session-aware chunking to `Chunker` or create `SessionChunker` — chunk long assistant responses, preserve tool call boundaries as chunk breaks, tag chunks with session_id
+- [x] Hook into existing embedding pipeline — session chunks get TF-IDF embeddings like any other artifact, stored in `chunks` table with `source_type = 'session'`
+- [x] Add incremental ingestion — track last-indexed session file modification time, only re-parse changed files
+- [x] Write `SessionIngestionServiceTest` — test dedup, incremental skip, chunking boundaries
 
 **Notes:**
 > Sessions can be large (100K+ tokens). Only index assistant and user messages — skip tool_result payloads (they're the code itself, already indexed). Decision extraction happens in Chapter 4.
