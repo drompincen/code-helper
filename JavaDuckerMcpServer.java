@@ -1,13 +1,13 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 21
-//DEPS io.modelcontextprotocol.sdk:mcp:1.1.0
+//DEPS io.modelcontextprotocol.sdk:mcp:0.8.1
 //DEPS org.slf4j:slf4j-nop:2.0.16
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.modelcontextprotocol.sdk.McpSchema;
-import io.modelcontextprotocol.sdk.McpServer;
-import io.modelcontextprotocol.sdk.server.transport.StdioServerTransportProvider;
+import io.modelcontextprotocol.spec.McpSchema;
+import io.modelcontextprotocol.server.McpServer;
+import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 
 import java.io.ByteArrayOutputStream;
 import java.net.Socket;
@@ -711,15 +711,9 @@ public class JavaDuckerMcpServer {
     static McpSchema.CallToolResult call(ThrowingSupplier fn) {
         try {
             String json = MAPPER.writeValueAsString(fn.get());
-            return McpSchema.CallToolResult.builder()
-                .content(List.of(new McpSchema.TextContent(json)))
-                .isError(false)
-                .build();
+            return new McpSchema.CallToolResult(List.of(new McpSchema.TextContent(json)), false);
         } catch (Exception e) {
-            return McpSchema.CallToolResult.builder()
-                .content(List.of(new McpSchema.TextContent("Error: " + e.getMessage())))
-                .isError(true)
-                .build();
+            return new McpSchema.CallToolResult(List.of(new McpSchema.TextContent("Error: " + e.getMessage())), true);
         }
     }
 

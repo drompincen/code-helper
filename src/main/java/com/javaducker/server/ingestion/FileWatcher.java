@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Component
+@Component("javaDuckerFileWatcher")
 public class FileWatcher {
 
     private static final Logger log = LoggerFactory.getLogger(FileWatcher.class);
