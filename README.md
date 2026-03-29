@@ -61,27 +61,50 @@ java -jar target/javaducker-1.0.0.jar \
   --javaducker.intake-dir=temp/intake
 ```
 
-### Use the CLI Client
+### Running Multiple Instances
+
+Each project can have its own JavaDucker instance. Use different ports, database files, and intake directories to run multiple instances on the same machine:
 
 ```bash
-# Check health
+# Instance 1: project-alpha on port 8080
+java -jar target/javaducker-1.0.0.jar \
+  --server.port=8080 \
+  --javaducker.db-path=/data/alpha/javaducker.duckdb \
+  --javaducker.intake-dir=/data/alpha/intake
+
+# Instance 2: project-beta on port 8081
+java -jar target/javaducker-1.0.0.jar \
+  --server.port=8081 \
+  --javaducker.db-path=/data/beta/javaducker.duckdb \
+  --javaducker.intake-dir=/data/beta/intake
+
+# Instance 3: project-gamma on port 8082
+java -jar target/javaducker-1.0.0.jar \
+  --server.port=8082 \
+  --javaducker.db-path=/data/gamma/javaducker.duckdb \
+  --javaducker.intake-dir=/data/gamma/intake
+```
+
+Each instance is fully isolated — its own DuckDB database, its own intake directory, its own port. The CLI client and MCP server connect to a specific instance via `--port` or `HTTP_PORT`.
+
+### Use the CLI Client
+
+Point the CLI at the correct port for your instance:
+
+```bash
+# Default instance (port 8080)
 ./run-client.sh health
-
-# Upload one file
-./run-client.sh upload-file --file ./docs/architecture.md
-
-# Upload a directory
-./run-client.sh upload-dir --root ./repo --ext .java,.xml,.md,.yml,.pdf
-
-# Search
 ./run-client.sh find --phrase "@Transactional" --mode exact
-./run-client.sh find --phrase "how onboarding approvals work" --mode hybrid
 
-# Index health check
-./run-client.sh index-health
+# Targeting a specific instance
+./run-client.sh --port 8081 health
+./run-client.sh --port 8081 upload-dir --root /projects/beta --ext .java,.xml,.md
+./run-client.sh --port 8081 find --phrase "how onboarding approvals work" --mode hybrid
 
-# View stats
-./run-client.sh stats
+# Other commands
+./run-client.sh --port 8082 upload-file --file ./docs/architecture.md
+./run-client.sh --port 8082 index-health
+./run-client.sh --port 8082 stats
 ```
 
 ## Features
@@ -152,7 +175,7 @@ JavaDucker ships a JBang-based MCP server (`JavaDuckerMcpServer.java`) that expo
    ./run-server.sh   # or run-server.cmd on Windows
    ```
 
-2. Register the MCP server in your Claude Code config:
+2. Register the MCP server in your Claude Code config (`.claude/settings.json` or `claude_desktop_config.json`):
    ```json
    {
      "mcpServers": {
@@ -170,6 +193,35 @@ JavaDucker ships a JBang-based MCP server (`JavaDuckerMcpServer.java`) that expo
    PROJECT_ROOT=.                      (default: .)
    JAVADUCKER_STALENESS_CHECK=true     (default: true, set false to disable)
    ```
+
+### Multiple MCP Instances (per-project)
+
+Register separate MCP servers for different projects, each pointing to its own JavaDucker instance:
+
+```json
+{
+  "mcpServers": {
+    "javaducker-alpha": {
+      "command": "/path/to/code-helper/run-mcp.sh",
+      "env": {
+        "HTTP_PORT": "8080",
+        "PROJECT_ROOT": "/projects/alpha"
+      }
+    },
+    "javaducker-beta": {
+      "command": "/path/to/code-helper/run-mcp.sh",
+      "env": {
+        "HTTP_PORT": "8081",
+        "PROJECT_ROOT": "/projects/beta"
+      }
+    }
+  }
+}
+```
+
+Each MCP server connects to a different backend via `HTTP_PORT`. Start the corresponding Spring Boot instances first (see [Running Multiple Instances](#running-multiple-instances)).
+
+The `PROJECT_ROOT` env var tells the MCP server where the git repo root is — used by `javaducker_blame`, `javaducker_related`, and `javaducker_stale` (git diff mode).
 
 ### MCP Tools
 
