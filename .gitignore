@@ -11,3 +11,6 @@ temp/
 *.duckdb.wal
 .claude/.state/
 .claude/edit-log.jsonl
+.mcp.json
+.claude/.javaducker/
+scripts/local/
