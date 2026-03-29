@@ -6,12 +6,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/edit-log.sh\"",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/local/hooks/edit-log.sh\"",
             "timeout": 3000
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/validate-plan.sh\"",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/local/hooks/validate-plan.sh\"",
+            "timeout": 3000
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/local/hooks/javaducker-index.sh\"",
             "timeout": 3000
           }
         ]
@@ -21,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/track-agents.sh\"",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/local/hooks/track-agents.sh\"",
             "timeout": 3000
           }
         ]
@@ -32,13 +37,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/memory-sync.sh\"",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/local/hooks/memory-sync.sh\"",
             "timeout": 5000
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/enrich-check.sh\"",
-            "timeout": 10000
           }
         ]
       }
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-end.sh\"",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/local/hooks/session-end.sh\"",
             "timeout": 3000
           }
         ]
@@ -57,7 +57,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/statusline.sh\""
+    "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/local/hooks/statusline.sh\""
   },
   "permissions": {
     "allow": [

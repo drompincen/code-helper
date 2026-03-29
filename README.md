@@ -6,6 +6,8 @@
 
 Code and content intelligence server for Claude Code. Indexes source files, documents, plans, notes, and threads into DuckDB with semantic search, dependency graphs, content classification, session history, and Reladomo support — all accessible via 49 MCP tools and 59 REST endpoints.
 
+> **New here?** See [start-here.md](start-here.md) for setup instructions including how to recreate local scripts.
+
 ## Tech Stack
 
 - **Java 21** + **Spring Boot 3.2**
