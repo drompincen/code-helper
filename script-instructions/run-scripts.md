@@ -73,21 +73,21 @@ java -cp target/javaducker-1.0.0.jar \
 
 ## run-mcp.sh
 
+Uses Spring AI MCP server with stdio transport (no JBang needed).
+
 ```bash
 #!/bin/bash
 cd "$(dirname "$0")/.."
 
 DB="${DB:-data/javaducker.duckdb}"
-HTTP_PORT="${HTTP_PORT:-8080}"
 INTAKE_DIR="${INTAKE_DIR:-temp/intake}"
 
 mvn -q package -DskipTests 1>&2
 
 java -jar target/javaducker-1.0.0.jar \
+    --spring.profiles.active=mcp \
     --javaducker.db-path="$DB" \
-    --server.port="$HTTP_PORT" \
-    --javaducker.intake-dir="$INTAKE_DIR" \
-    --spring.main.web-application-type=none "$@"
+    --javaducker.intake-dir="$INTAKE_DIR" "$@"
 ```
 
 ---
@@ -105,14 +105,12 @@ echo Building project... 1>&2
 call mvn -q package -DskipTests 1>&2
 
 if "%DB%"=="" set DB=data\javaducker.duckdb
-if "%HTTP_PORT%"=="" set HTTP_PORT=8080
 if "%INTAKE_DIR%"=="" set INTAKE_DIR=temp\intake
 
 java -jar target\javaducker-1.0.0.jar ^
+    --spring.profiles.active=mcp ^
     --javaducker.db-path="%DB%" ^
-    --server.port=%HTTP_PORT% ^
-    --javaducker.intake-dir="%INTAKE_DIR%" ^
-    --spring.main.web-application-type=none %*
+    --javaducker.intake-dir="%INTAKE_DIR%" %*
 ```
 
 ---

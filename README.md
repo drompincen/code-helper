@@ -13,7 +13,7 @@ Code and content intelligence server for Claude Code. Indexes source files, docu
 - **Java 21** + **Spring Boot 3.2**
 - **REST API** (Spring MVC) — 59 endpoints
 - **DuckDB** file-based persistence (JDBC) — 22 tables
-- **MCP Server** (JBang + MCP SDK) — 49 tools for Claude Code
+- **MCP Server** (Spring AI) — 49 tools for Claude Code via stdio or SSE
 - **picocli** CLI client
 - **Apache PDFBox** for PDF extraction
 - **Apache POI** for Office documents (DOCX, XLSX, PPTX, DOC, XLS, PPT)
@@ -168,13 +168,13 @@ Point the CLI at the correct port for your instance:
 
 ## MCP Server (Claude Code Integration)
 
-JavaDucker ships a JBang-based MCP server (`JavaDuckerMcpServer.java`) that exposes 49 tools for Claude Code.
+JavaDucker uses Spring AI's built-in MCP server with stdio transport. 49 tools are exposed as `@Tool`-annotated Spring beans.
 
 ### Setup
 
-1. Start the JavaDucker server:
+1. Build the project:
    ```bash
-   ./run-server.sh   # or run-server.cmd on Windows
+   mvn package -DskipTests
    ```
 
 2. Register the MCP server in your Claude Code config (`.claude/settings.json` or `claude_desktop_config.json`):
@@ -182,19 +182,14 @@ JavaDucker ships a JBang-based MCP server (`JavaDuckerMcpServer.java`) that expo
    {
      "mcpServers": {
        "javaducker": {
-         "command": "/path/to/code-helper/run-mcp.sh"
+         "command": "java",
+         "args": ["-jar", "/path/to/code-helper/target/javaducker-1.0.0.jar", "--spring.profiles.active=mcp"]
        }
      }
    }
    ```
 
-3. Environment variables (all optional):
-   ```
-   JAVADUCKER_HOST=localhost           (default: localhost)
-   HTTP_PORT=8080                      (default: 8080)
-   PROJECT_ROOT=.                      (default: .)
-   JAVADUCKER_STALENESS_CHECK=true     (default: true, set false to disable)
-   ```
+   Or use the run script: `"command": "/path/to/code-helper/scripts/local/run-mcp.sh"`
 
 ### Multiple MCP Instances (per-project)
 
@@ -333,14 +328,12 @@ javaducker_reladomo_schema  object_name=OrderItem
 ## Architecture
 
 ```
-Claude Code ←─── MCP (stdio) ───→ JavaDuckerMcpServer.java (JBang)
+Claude Code ←─── MCP (stdio) ───→ Spring Boot + Spring AI MCP
                                           │
-                                     HTTP REST
-                                          │
-                                          ▼
                                ┌──────────────────────┐
                                │  Spring Boot Server   │
                                │                      │
+                               │  MCP Tools (49)       │─── @Tool beans
                                │  RestController       │─── 59 endpoints
                                │  Services (14)        │
                                │  Ingestion Pipeline   │

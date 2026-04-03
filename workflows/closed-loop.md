@@ -68,6 +68,10 @@ Append to `context/MEMORY.md`:
 - Copy confirmed outputs to final location
 - Write final summary to `context/MEMORY.md`
 
+### 9. JavaDucker hygiene (if available)
+- Run `workflows/javaducker-hygiene.md` Phase 2 (enrich new artifacts) and Phase 3 (compact superseded artifacts from prior iterations)
+- Record loop decisions with `javaducker_extract_decisions`
+
 ## Anti-patterns to avoid
 
 - **Don't fix everything at once** — group by category, fix in parallel batches

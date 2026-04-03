@@ -1,0 +1,14 @@
+# MCP stdio mode — for Claude Code integration
+# Launch: java -jar target/javaducker-1.0.0.jar --spring.profiles.active=mcp
+spring:
+  main:
+    web-application-type: none
+  ai:
+    mcp:
+      server:
+        stdio: true
+
+logging:
+  level:
+    root: WARN
+    com.javaducker: INFO

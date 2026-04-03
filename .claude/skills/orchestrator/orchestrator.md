@@ -20,7 +20,8 @@ You are a pipeline orchestrator. Your job is to run closed-loop workflows that c
 ## Process
 
 1. Read the workflow file (e.g., `workflows/closed-loop.md`)
-2. Run the check command or orchestration script
+2. **If JavaDucker is available** — use `javaducker_index_health` to check overall index freshness. Use `javaducker_stale` with `git_diff_ref: "HEAD~1"` to find stale files. Re-index stale files before starting. After each iteration, use `javaducker_extract_points` to record key findings (RISK, ACTION, INSIGHT) from the iteration. Use `javaducker_concept_health` to monitor concept trends across iterations. Use `javaducker_synthesize` on completed/obsolete artifacts to keep the index compact.
+3. Run the check command or orchestration script
 3. Parse the JSON report
 4. Group issues into independent categories
 5. For each category, spawn an Agent with `run_in_background: true`:
@@ -73,6 +74,16 @@ After each iteration, log:
 - Regression: [yes/no]
 - Next: [continue/revert/done]
 ```
+
+## Post-loop: Knowledge curation (when JavaDucker is available)
+
+After the loop exits, you are responsible for curating what was learned:
+
+1. **Record what worked and what didn't** — `javaducker_extract_decisions` with each key decision: what fix strategies worked, what regressed and why, the final approach chosen. Tag with the domain area. This is critical — future orchestrators will find these via `javaducker_recent_decisions` and avoid repeating failed approaches.
+2. **Extract insights** — for each file that was fixed, `javaducker_extract_points` with type `INSIGHT` recording what the root issue was. Type `RISK` for any fragile areas you noticed. Type `ACTION` for any follow-up work needed.
+3. **Enrich new artifacts** — `javaducker_enrich_queue` for files edited during the loop. Read each, then `javaducker_classify`, `javaducker_extract_points`, `javaducker_tag`, `javaducker_mark_enriched`. Don't classify blindly — read the content first.
+4. **Supersede obsolete intermediate states** — iterations that were reverted produced artifacts that are now noise. `javaducker_set_freshness` → `superseded` on those. `javaducker_synthesize` with a note: "Reverted in iteration N because [reason]. Replaced by [final approach]."
+5. **Check for invalidated decisions** — `javaducker_find_points` with `DECISION` type. If the loop's outcome contradicts a prior recorded decision, supersede it and record the new decision.
 
 ## Principles
 

@@ -11,7 +11,8 @@ You are a task planner. Your job is to break down the user's request into a chap
 ## Responsibilities
 
 1. **Decompose** the task into chapters — each chapter is a logical phase of work
-2. **Break chapters into steps** — discrete, independently completable items within each chapter
+2. **If JavaDucker is available** — use `javaducker_search` to identify all files that will be affected by the task. Use `javaducker_dependents` on key files to discover downstream impact. Use `javaducker_session_context` to find prior conversations and decisions related to this area. Use `javaducker_recent_decisions` to check for relevant past decisions. This produces more accurate chapter breakdowns and catches files that Grep-based search might miss.
+3. **Break chapters into steps** — discrete, independently completable items within each chapter
 3. **Identify dependencies** — which chapters/steps must complete before others can start
 4. **Maximize parallelism** — default to parallel; only serialize when there's a true data dependency
 5. **Identify loops** — flag steps that need repeat-until-pass iteration
@@ -109,6 +110,14 @@ At session start, the memory-sync hook scans `drom-plans/` for plans with `statu
 3. **Find the first unchecked step** `[ ]` in that chapter
 4. **Resume from there** — do not redo completed steps
 5. **Continue tracking** progress as normal
+
+## Knowledge curation (when JavaDucker is available)
+
+When creating or completing a plan, curate the knowledge:
+
+1. **Before planning** — `javaducker_recent_decisions` and `javaducker_find_points` with `CONSTRAINT` and `RISK` types. Read the results. If any prior constraint or risk applies to your plan, incorporate it. If a prior decision has been invalidated by the current task, note it.
+2. **After plan completion** — `javaducker_extract_decisions` to record key decisions made during planning (scope choices, trade-offs, rejected approaches). Tag them so future planners find them.
+3. **Supersede old plans** — if this plan replaces or invalidates a prior plan that was indexed, `javaducker_set_freshness` → `superseded` on the old plan artifact, then `javaducker_synthesize` it with a summary of what it planned, why it's superseded, and what replaced it.
 
 ## Principles
 

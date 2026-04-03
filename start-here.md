@@ -47,6 +47,8 @@ bash scripts/local/run-server.sh
 **MCP stdio mode** (for Claude Code integration):
 ```bash
 bash scripts/local/run-mcp.sh
+# or directly:
+java -jar target/javaducker-1.0.0.jar --spring.profiles.active=mcp
 ```
 
 **CLI client**:

@@ -4,6 +4,7 @@
 Spawn parallel agents in ONE message:
 - **Agent A**: Identify refactoring targets — duplication, complexity, unclear naming, tight coupling
 - **Agent B**: Run existing tests to establish passing baseline, note coverage gaps
+- **Agent C** (if JavaDucker available): `javaducker_dependents` on target files to discover all callers and importers before restructuring
 
 Wait for both.
 
