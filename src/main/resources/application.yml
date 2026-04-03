@@ -1,6 +1,14 @@
 server:
   port: 8080
 
+spring:
+  ai:
+    mcp:
+      server:
+        name: javaducker
+        version: 1.0.0
+        type: SYNC
+
 javaducker:
   db-path: data/javaducker.duckdb
   intake-dir: temp/intake

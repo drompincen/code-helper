@@ -25,6 +25,8 @@ public class ExplainService {
     private final DependencyService dependencyService;
     private final ContentIntelligenceService contentIntelligenceService;
     private final DuckDBDataSource dataSource;
+    private final SemanticTagService semanticTagService;
+    private final KnowledgeGraphService knowledgeGraphService;
 
     // Optional services — may not be built yet
     private final Object gitBlameService;
@@ -35,6 +37,8 @@ public class ExplainService {
                           DependencyService dependencyService,
                           ContentIntelligenceService contentIntelligenceService,
                           DuckDBDataSource dataSource,
+                          SemanticTagService semanticTagService,
+                          KnowledgeGraphService knowledgeGraphService,
                           @Autowired(required = false) @SuppressWarnings("unused")
                           Object gitBlameServicePlaceholder,
                           @Autowired(required = false) @SuppressWarnings("unused")
@@ -43,6 +47,8 @@ public class ExplainService {
         this.dependencyService = dependencyService;
         this.contentIntelligenceService = contentIntelligenceService;
         this.dataSource = dataSource;
+        this.semanticTagService = semanticTagService;
+        this.knowledgeGraphService = knowledgeGraphService;
         // Will be replaced with real types when GitBlameService / CoChangeService exist
         this.gitBlameService = null;
         this.coChangeService = null;
@@ -91,6 +97,18 @@ public class ExplainService {
         // 8. related_artifacts (limit 5)
         addSection(result, "related_artifacts", () ->
                 limitList(contentIntelligenceService.getRelatedByConcept(artifactId), 5));
+
+        // 8b. semantic_tags
+        addSection(result, "semantic_tags", () -> {
+            List<Map<String, Object>> tags = semanticTagService.getTagsForArtifact(artifactId);
+            return tags.isEmpty() ? null : tags;
+        });
+
+        // 8c. graph_entities
+        addSection(result, "graph_entities", () -> {
+            List<Map<String, Object>> entities = knowledgeGraphService.getEntitiesForArtifact(artifactId);
+            return entities.isEmpty() ? null : entities;
+        });
 
         // 9. blame_highlights (optional — service may not exist)
         if (gitBlameService != null) {

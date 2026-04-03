@@ -1,0 +1,7 @@
+# REST API server mode (default behavior)
+# Launch: java -jar target/javaducker-1.0.0.jar --spring.profiles.active=server
+spring:
+  ai:
+    mcp:
+      server:
+        stdio: false

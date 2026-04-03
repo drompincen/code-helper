@@ -1,7 +1,8 @@
 # Code Review Workflow
 
 1. **Read the diff holistically** — Understand the full change before commenting on details.
-2. **Check each dimension:**
+2. **If JavaDucker is available** — use `javaducker_dependents` on changed files to check for downstream impact that might need updating.
+3. **Check each dimension:**
    - Correctness — Does it do what it's supposed to?
    - Security — Any injection, auth, or data exposure risks?
    - Performance — Any unnecessary loops, queries, or allocations?

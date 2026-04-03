@@ -4,6 +4,7 @@
 Spawn parallel agents in ONE message:
 - **Agent A**: Read requirements + check `context/MEMORY.md` and `context/CONVENTIONS.md`
 - **Agent B**: Explore existing code — find related files, patterns, interfaces to extend
+- **Agent C** (if JavaDucker available): `javaducker_search` for similar features and patterns, `javaducker_map` for project orientation
 
 Wait for both. Combine into implementation plan.
 

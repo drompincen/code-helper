@@ -42,8 +42,10 @@ class ExplainServiceTest {
         SchemaBootstrap bootstrap = new SchemaBootstrap(dataSource, config, worker);
         bootstrap.createSchema();
 
+        SemanticTagService semanticTagService = new SemanticTagService(dataSource);
+        KnowledgeGraphService knowledgeGraphService = new KnowledgeGraphService(dataSource, new EmbeddingService(config));
         explainService = new ExplainService(artifactService, dependencyService,
-                ciService, dataSource, null, null);
+                ciService, dataSource, semanticTagService, knowledgeGraphService, null, null);
     }
 
     @AfterAll

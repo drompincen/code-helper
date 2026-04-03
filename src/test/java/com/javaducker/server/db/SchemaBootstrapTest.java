@@ -137,6 +137,64 @@ class SchemaBootstrapTest {
     }
 
     @Test
+    void createsSemanticTagsTable() throws SQLException {
+        SchemaBootstrap bootstrap = createBootstrap();
+        bootstrap.createSchema();
+        Connection conn = dataSource.getConnection();
+        try (Statement stmt = conn.createStatement()) {
+            assertDoesNotThrow(() -> stmt.executeQuery("SELECT COUNT(*) FROM artifact_semantic_tags"));
+        }
+    }
+
+    @Test
+    void createsSemanticTagsIndices() throws SQLException {
+        SchemaBootstrap bootstrap = createBootstrap();
+        bootstrap.createSchema();
+        Connection conn = dataSource.getConnection();
+        for (String idx : new String[]{"idx_semantic_tags_tag", "idx_semantic_tags_category"}) {
+            try (var ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM duckdb_indexes() WHERE index_name = ?")) {
+                ps.setString(1, idx);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    assertEquals(1, rs.getLong(1), "Index " + idx + " should exist");
+                }
+            }
+        }
+    }
+
+    @Test
+    void createsKnowledgeGraphTables() throws SQLException {
+        SchemaBootstrap bootstrap = createBootstrap();
+        bootstrap.createSchema();
+        Connection conn = dataSource.getConnection();
+        try (Statement stmt = conn.createStatement()) {
+            assertDoesNotThrow(() -> stmt.executeQuery("SELECT COUNT(*) FROM entities"));
+            assertDoesNotThrow(() -> stmt.executeQuery("SELECT COUNT(*) FROM entity_relationships"));
+            assertDoesNotThrow(() -> stmt.executeQuery("SELECT COUNT(*) FROM entity_communities"));
+        }
+    }
+
+    @Test
+    void createsKnowledgeGraphIndices() throws SQLException {
+        SchemaBootstrap bootstrap = createBootstrap();
+        bootstrap.createSchema();
+        Connection conn = dataSource.getConnection();
+        String[] expected = {"idx_entities_name", "idx_entities_type", "idx_rel_source",
+                "idx_rel_target", "idx_rel_type", "idx_community_level"};
+        for (String idx : expected) {
+            try (var ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM duckdb_indexes() WHERE index_name = ?")) {
+                ps.setString(1, idx);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    assertEquals(1, rs.getLong(1), "Index " + idx + " should exist");
+                }
+            }
+        }
+    }
+
+    @Test
     void schemaIsIdempotent() throws SQLException {
         SchemaBootstrap bootstrap = createBootstrap();
 

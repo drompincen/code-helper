@@ -28,6 +28,8 @@ public class JavaDuckerRestController {
     private final CoChangeService coChangeService;
     private final ExplainService explainService;
     private final SessionIngestionService sessionIngestionService;
+    private final SemanticTagService semanticTagService;
+    private final KnowledgeGraphService knowledgeGraphService;
 
     public JavaDuckerRestController(UploadService uploadService, ArtifactService artifactService,
                                      SearchService searchService, StatsService statsService,
@@ -38,7 +40,9 @@ public class JavaDuckerRestController {
                                      GitBlameService gitBlameService,
                                      CoChangeService coChangeService,
                                      ExplainService explainService,
-                                     SessionIngestionService sessionIngestionService) {
+                                     SessionIngestionService sessionIngestionService,
+                                     SemanticTagService semanticTagService,
+                                     KnowledgeGraphService knowledgeGraphService) {
         this.uploadService = uploadService;
         this.artifactService = artifactService;
         this.searchService = searchService;
@@ -53,6 +57,8 @@ public class JavaDuckerRestController {
         this.coChangeService = coChangeService;
         this.explainService = explainService;
         this.sessionIngestionService = sessionIngestionService;
+        this.semanticTagService = semanticTagService;
+        this.knowledgeGraphService = knowledgeGraphService;
     }
 
     @GetMapping("/health")
@@ -585,5 +591,100 @@ public class JavaDuckerRestController {
     public ResponseEntity<Map<String, Object>> reladomoConfig(
             @RequestParam(required = false) String objectName) throws Exception {
         return ResponseEntity.ok(reladomoQueryService.getConfig(objectName));
+    }
+
+    // ── Semantic Tags endpoints ──────────────────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    @PostMapping("/semantic-tags")
+    public Map<String, Object> writeSemanticTags(@RequestBody Map<String, Object> body) throws Exception {
+        String artifactId = (String) body.get("artifactId");
+        List<Map<String, Object>> tags = (List<Map<String, Object>>) body.get("tags");
+        return semanticTagService.writeTags(artifactId, tags);
+    }
+
+    @GetMapping("/semantic-tags/search")
+    public List<Map<String, Object>> searchSemanticTags(
+            @RequestParam String tags,
+            @RequestParam(defaultValue = "any") String matchMode,
+            @RequestParam(required = false) String category) throws Exception {
+        List<String> tagList = Arrays.asList(tags.split(","));
+        boolean matchAll = "all".equalsIgnoreCase(matchMode);
+        List<Map<String, Object>> results = semanticTagService.searchByTags(tagList, matchAll);
+        if (category != null && !category.isBlank()) {
+            List<Map<String, Object>> byCategory = semanticTagService.findByCategory(category);
+            var categoryArtifacts = new HashSet<String>();
+            for (Map<String, Object> row : byCategory) {
+                categoryArtifacts.add((String) row.get("artifact_id"));
+            }
+            results = results.stream()
+                    .filter(r -> categoryArtifacts.contains(r.get("artifact_id")))
+                    .toList();
+        }
+        return results;
+    }
+
+    @GetMapping("/semantic-tags/cloud")
+    public Map<String, Object> semanticTagCloud() throws Exception {
+        return semanticTagService.getTagCloud();
+    }
+
+    @GetMapping("/semantic-tags/suggest/{artifactId}")
+    public List<Map<String, Object>> suggestSemanticTags(@PathVariable String artifactId) throws Exception {
+        return semanticTagService.suggestTags(artifactId);
+    }
+
+    // ── Knowledge Graph ──────────────────────────────────────────────────────
+
+    @PostMapping("/entities/extract")
+    public Map<String, Object> extractEntities(@RequestBody Map<String, Object> body) throws Exception {
+        String artifactId = (String) body.get("artifactId");
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> entities = (List<Map<String, String>>) body.get("entities");
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> relationships = (List<Map<String, String>>) body.getOrDefault("relationships", List.of());
+        int created = 0, merged = 0;
+        for (Map<String, String> e : entities) {
+            Map<String, Object> r = knowledgeGraphService.upsertEntity(e.get("name"), e.get("type"),
+                    e.getOrDefault("description", null), artifactId, null);
+            if ("created".equals(r.get("action"))) created++; else merged++;
+        }
+        int relCreated = 0, relMerged = 0;
+        for (Map<String, String> r : relationships) {
+            Map<String, Object> res = knowledgeGraphService.upsertRelationship(
+                    r.get("sourceEntityId"), r.get("targetEntityId"), r.get("type"),
+                    r.getOrDefault("description", null), artifactId, null, 1.0);
+            if ("created".equals(res.get("action"))) relCreated++; else relMerged++;
+        }
+        return Map.of("entities_created", created, "entities_merged", merged,
+                "relationships_created", relCreated, "relationships_merged", relMerged);
+    }
+
+    @GetMapping("/entities")
+    public Map<String, Object> getEntities(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String name) throws Exception {
+        List<Map<String, Object>> results;
+        if (name != null) results = knowledgeGraphService.findEntitiesByName(name);
+        else if (type != null) results = knowledgeGraphService.findEntitiesByType(type);
+        else results = knowledgeGraphService.findEntitiesByName("");
+        return Map.of("entities", results, "count", results.size());
+    }
+
+    @PostMapping("/entities/merge")
+    public Map<String, Object> mergeEntities(@RequestBody Map<String, String> body) throws Exception {
+        return knowledgeGraphService.mergeEntities(
+                body.get("sourceEntityId"), body.get("targetEntityId"),
+                body.getOrDefault("mergedDescription", null));
+    }
+
+    @DeleteMapping("/entities/by-artifact/{artifactId}")
+    public Map<String, Object> deleteEntitiesByArtifact(@PathVariable String artifactId) throws Exception {
+        return knowledgeGraphService.deleteEntitiesForArtifact(artifactId);
+    }
+
+    @GetMapping("/graph/stats")
+    public Map<String, Object> graphStats() throws Exception {
+        return knowledgeGraphService.getStats();
     }
 }

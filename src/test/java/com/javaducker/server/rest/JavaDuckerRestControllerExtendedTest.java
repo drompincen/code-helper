@@ -39,6 +39,8 @@ class JavaDuckerRestControllerExtendedTest {
     @MockBean GitBlameService gitBlameService;
     @MockBean CoChangeService coChangeService;
     @MockBean SessionIngestionService sessionIngestionService;
+    @MockBean SemanticTagService semanticTagService;
+    @MockBean KnowledgeGraphService knowledgeGraphService;
 
     // ── Search with staleness banner ─────────────────────────────────────
 

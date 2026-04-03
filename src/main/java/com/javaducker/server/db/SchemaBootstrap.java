@@ -427,6 +427,100 @@ public class SchemaBootstrap {
                     ON session_decisions (tags)
                 """);
 
+            // Semantic tags for LightRAG parity
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_semantic_tags (
+                    artifact_id VARCHAR NOT NULL,
+                    tag VARCHAR NOT NULL,
+                    category VARCHAR NOT NULL,
+                    confidence FLOAT DEFAULT 1.0,
+                    rationale VARCHAR,
+                    source VARCHAR DEFAULT 'llm',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (artifact_id, tag)
+                )
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_semantic_tags_tag
+                    ON artifact_semantic_tags (tag)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_semantic_tags_category
+                    ON artifact_semantic_tags (category)
+                """);
+
+            // Knowledge Graph: entities
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS entities (
+                    entity_id VARCHAR PRIMARY KEY,
+                    entity_name VARCHAR NOT NULL,
+                    entity_type VARCHAR NOT NULL,
+                    description VARCHAR,
+                    summary VARCHAR,
+                    source_artifact_ids VARCHAR,
+                    source_chunk_ids VARCHAR,
+                    mention_count INTEGER DEFAULT 1,
+                    embedding DOUBLE[],
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+
+            // Knowledge Graph: entity relationships
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS entity_relationships (
+                    relationship_id VARCHAR PRIMARY KEY,
+                    source_entity_id VARCHAR NOT NULL,
+                    target_entity_id VARCHAR NOT NULL,
+                    relationship_type VARCHAR NOT NULL,
+                    description VARCHAR,
+                    weight FLOAT DEFAULT 1.0,
+                    source_artifact_ids VARCHAR,
+                    source_chunk_ids VARCHAR,
+                    embedding DOUBLE[],
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+
+            // Knowledge Graph: entity communities
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS entity_communities (
+                    community_id VARCHAR PRIMARY KEY,
+                    community_name VARCHAR,
+                    summary VARCHAR,
+                    entity_ids VARCHAR,
+                    level INTEGER DEFAULT 0,
+                    parent_community_id VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+
+            // Knowledge Graph: indices
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_entities_name
+                    ON entities (entity_name)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_entities_type
+                    ON entities (entity_type)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rel_source
+                    ON entity_relationships (source_entity_id)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rel_target
+                    ON entity_relationships (target_entity_id)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rel_type
+                    ON entity_relationships (relationship_type)
+                """);
+            stmt.execute("""
+                CREATE INDEX IF NOT EXISTS idx_community_level
+                    ON entity_communities (level)
+                """);
+
             log.info("Database schema created/verified");
         }
     }

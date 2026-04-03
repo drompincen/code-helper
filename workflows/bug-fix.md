@@ -4,6 +4,7 @@
 Spawn parallel agents in ONE message:
 - **Agent A**: Reproduce the bug — find failing test case or steps to trigger
 - **Agent B**: Search codebase — grep for related patterns, read recent git log for the area
+- **Agent C** (if JavaDucker available): `javaducker_search` for error messages and related code paths, `javaducker_explain` on suspect files
 
 Wait for both. Combine findings.
 

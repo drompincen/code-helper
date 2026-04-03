@@ -39,6 +39,8 @@ class JavaDuckerRestControllerTest {
     @MockBean GitBlameService gitBlameService;
     @MockBean CoChangeService coChangeService;
     @MockBean SessionIngestionService sessionIngestionService;
+    @MockBean SemanticTagService semanticTagService;
+    @MockBean KnowledgeGraphService knowledgeGraphService;
 
     @Test
     void healthReturnsOk() throws Exception {
